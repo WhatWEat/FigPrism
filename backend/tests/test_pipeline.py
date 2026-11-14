@@ -1,0 +1,96 @@
+import io
+import json
+import tarfile
+import fitz
+import pytest
+from PIL import Image,ImageDraw
+from figprism.palette import extract_palette
+from figprism.tex import unpack,figures
+from figprism.extraction import detect,render
+from figprism.ingest import ingest_pdf
+from figprism.auth import create_user
+from figprism.db import connect
+from figprism.storage import Storage
+
+@pytest.fixture
+def paper():
+    d=fitz.open();p=d.new_page(width=600,height=800)
+    p.insert_text((50,50),'A Test of Scientific Figure Extraction',fontsize=20)
+    p.draw_rect(fitz.Rect(70,100,240,190),color=(.14,.35,.66),fill=(.88,.93,.99),width=2)
+    p.draw_rect(fitz.Rect(330,100,500,190),color=(.2,.6,.4),fill=(.9,.98,.91),width=2)
+    p.draw_line((240,145),(330,145),color=(.2,.2,.2),width=2)
+    p.insert_text((100,145),'Encoder',fontsize=16)
+    p.insert_text((360,145),'Decoder',fontsize=16)
+    p.insert_text((70,220),'Figure 1: Overview of the model architecture.',fontsize=11)
+    raw=d.tobytes();d.close();return raw
+
+def test_palette_background_and_pairing():
+    im=Image.new('RGB',(300,200),'white');draw=ImageDraw.Draw(im)
+    draw.rectangle((10,10,200,180),fill='#E1EDFA',outline='#24589F',width=18)
+    palette=extract_palette(im)
+    assert all(c['hex']!='#FFFFFF' for c in palette['colors'])
+    assert any(p['fill']=='#E1EDFA' and p['stroke']=='#24589F' for p in palette['pairs'])
+
+def test_vector_crop_keeps_text(paper,client):
+    with fitz.open(stream=paper,filetype='pdf') as d:
+        crops=detect(d[0]);assert len(crops)==1
+        result=render(d,crops[0]);assert result['width']>2000
+        assert result['blurhash']
+        with fitz.open(stream=result['raw'],filetype='pdf') as out:
+            assert out[0].rect.width<500
+            assert 'Encoder' in out[0].get_text()
+            assert out[0].get_drawings()
+
+def test_tex_archive_does_not_extract_traversal():
+    out=io.BytesIO()
+    with tarfile.open(fileobj=out,mode='w') as t:
+        for name,body in [('../outside.tex',b'bad'),('main.tex',b'\\documentclass{article}\\begin{figure}\\caption{A {nested} caption}\\end{figure}')]:
+            info=tarfile.TarInfo(name);info.size=len(body);t.addfile(info,io.BytesIO(body))
+    files=unpack(out.getvalue());assert '../outside.tex' not in files
+    assert figures(files)[0]['caption']=='A nested caption'
+
+@pytest.fixture
+def fake_storage(monkeypatch):
+    blobs={}
+    async def put(self,key,data,content_type='application/octet-stream'):blobs[key]=data
+    async def get(self,key):return blobs[key]
+    monkeypatch.setattr(Storage,'put',put);monkeypatch.setattr(Storage,'get',get)
+    return blobs
+
+@pytest.mark.asyncio
+async def test_ingest_assets_search_and_ownership(client,paper,fake_storage):
+    pid=await ingest_pdf(paper,vision_driver='codex_subagent')
+    assert len(fake_storage)>=5
+    same=await ingest_pdf(paper,vision_driver='codex_subagent');assert same==pid
+    res=client.get('/api/figures?q=Encoder')
+    assert res.status_code==200
+    res=client.get('/api/figures?q=architecture');assert res.json()['total']==1
+    f=res.json()['items'][0]
+    assert f['review_status']=='needs_review'
+    assert 'asset_base' not in f
+    assert client.get(f['raw_url']).content.startswith(b'%PDF')
+    assert client.get('/api/assets/hd/'+f['id']+'.webp?v=obsolete').status_code==404
+    assert client.post('/api/ingest/link',json={'input':'2501.00001'}).status_code==401
+    assert client.post('/api/collections',json={'name':'test'}).status_code==401
+    for name in ('alice','bob'):create_user(name,'long-enough-password')
+    client.post('/api/auth/login',json={'username':'alice','password':'long-enough-password'})
+    cid=client.post('/api/collections',json={'name':'My board'}).json()['id']
+    assert client.put('/api/collections/'+cid+'/items',json={'figure_id':f['id'],'user_note':'Use these colors'}).status_code==200
+    assert client.get('/api/collections/'+cid+'/export').status_code==200
+    assert client.post('/api/figures/'+f['id']+'/view').status_code==200
+    assert len(client.get('/api/me/history').json())==1
+    assert client.get('/api/admin/overview').status_code==403
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login',json={'username':'bob','password':'long-enough-password'})
+    assert client.get('/api/collections/'+cid).status_code==404
+    assert client.get('/api/collections/'+cid+'/export').status_code==404
+    assert client.delete('/api/collections/'+cid).status_code==404
+    assert client.get('/api/me/history').json()==[]
+
+@pytest.mark.asyncio
+async def test_network_allowlist():
+    from figprism.network import fetch
+    from figprism.ingest import resolve
+    for url in ('http://127.0.0.1/internal','https://arxiv.org.evil.invalid/pdf/test','https://user@arxiv.org/pdf/1'):
+        with pytest.raises(ValueError):await fetch(url)
+    with pytest.raises(ValueError):await resolve('https://evil.invalid/2501.12345')

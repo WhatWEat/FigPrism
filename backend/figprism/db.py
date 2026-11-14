@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS figures (
  width INTEGER NOT NULL, height INTEGER NOT NULL, aspect_ratio REAL NOT NULL,
  blurhash TEXT, fonts TEXT DEFAULT '[]', palette TEXT NOT NULL, color_buckets TEXT DEFAULT '[]',
  subitems TEXT DEFAULT '[]', tikz_code TEXT, extract_method TEXT DEFAULT 'pdf_snap_crop',
- confidence REAL DEFAULT 0, review_status TEXT DEFAULT 'needs_review',
+ sub_tags TEXT DEFAULT '[]', confidence REAL DEFAULT 0, review_status TEXT DEFAULT 'needs_review',
  asset_base TEXT NOT NULL, version_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS figures_paper_idx ON figures(paper_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS figures_fts USING fts5(figure_id UNINDEXED, title, caption, fonts);
@@ -62,6 +62,9 @@ def init_db():
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
+        columns={r[1] for r in db.execute("PRAGMA table_info(figures)")}
+        if "sub_tags" not in columns:
+            db.execute("ALTER TABLE figures ADD COLUMN sub_tags TEXT DEFAULT '[]'")
         path = get_settings().domains_file
         if path.exists():
             for domain in yaml.safe_load(path.read_text()) or []:

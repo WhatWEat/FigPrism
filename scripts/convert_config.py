@@ -22,7 +22,7 @@ def convert(source: Path, output: Path):
         raise ValueError("Missing required API or WebDAV fields; inspect source files locally")
     config = {
         "secret_key": secrets.token_urlsafe(48),
-        "webdav": {"url": dav["url"].rstrip("/"), "username": dav["username"], "password": dav["password"], "root": dav.get("dir", "/figprism")},
+        "webdav": {"url": dav["url"].rstrip("/"), "username": dav["username"], "password": dav["password"], "root": ("/figprism" if ">" in dav.get("dir", "") else dav.get("dir", "/figprism"))},
         "vision": {"base_url": re.sub(r"/chat/completions/?$", "", url.group()), "api_key": token.group(1), "model": model.group(1), "driver": "openai_mini"},
     }
     # Exclusive creation avoids silently rotating an existing application's signing key.

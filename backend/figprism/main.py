@@ -55,3 +55,6 @@ def health():
 @app.get('/api/domains')
 def domains():
     return all_domains()
+
+from .api import router as api_router
+app.include_router(api_router)
