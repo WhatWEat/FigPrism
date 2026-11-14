@@ -112,23 +112,19 @@ def stats():
         }
 
 
-@router.get("/figures")
-def list_figures(
-    q: str = "",
-    domain: str = "",
-    sub_tags: str = "",
-    tag_mode: Literal["any", "all"] = "any",
-    venue: str = "",
-    layout: str = "",
-    span: str = "",
-    archetype: str = "",
-    color: str = "",
-    view: Literal["all", "method", "data"] = "all",
-    honors: bool = False,
-    show_cases: bool = False,
-    sort: Literal["newest", "popular"] = "newest",
-    offset: int = Query(0, ge=0),
-    limit: int = Query(24, ge=1, le=100),
+def figure_conditions(
+    q,
+    domain,
+    sub_tags,
+    tag_mode,
+    venue,
+    layout,
+    span,
+    archetype,
+    color,
+    view,
+    honors,
+    show_cases,
 ):
     where = []
     args = []
@@ -182,6 +178,41 @@ def list_figures(
     if not show_cases:
         add("f.archetype!='Case Study'")
     suffix = "WHERE " + " AND ".join(where) if where else ""
+    return suffix, args
+
+
+@router.get("/figures")
+def list_figures(
+    q: str = "",
+    domain: str = "",
+    sub_tags: str = "",
+    tag_mode: Literal["any", "all"] = "any",
+    venue: str = "",
+    layout: str = "",
+    span: str = "",
+    archetype: str = "",
+    color: str = "",
+    view: Literal["all", "method", "data"] = "all",
+    honors: bool = False,
+    show_cases: bool = False,
+    sort: Literal["newest", "popular"] = "newest",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(24, ge=1, le=100),
+):
+    suffix, args = figure_conditions(
+        q,
+        domain,
+        sub_tags,
+        tag_mode,
+        venue,
+        layout,
+        span,
+        archetype,
+        color,
+        view,
+        honors,
+        show_cases,
+    )
     with connect() as db:
         total = db.execute(
             "SELECT COUNT(*) FROM figures f JOIN papers p ON p.id=f.paper_id " + suffix,
@@ -201,6 +232,166 @@ def list_figures(
         "total": total,
         "next_offset": offset + len(rows) if offset + len(rows) < total else None,
     }
+
+
+def figure_number(figure):
+    numbers = re.findall(r"\d+", figure["fig_label"])
+    return (
+        tuple(map(int, numbers)) if numbers else (10**9,),
+        figure["page_number"],
+        figure["id"],
+    )
+
+
+def feed_figure(row):
+    figure = deserialize(row)
+    figure["palette_top5"] = figure["palette"]["colors"][:5]
+    figure["subfigure_count"] = len(figure["subitems"])
+    return figure
+
+
+@router.get("/figures/feed")
+def figure_feed(
+    group_by: Literal["paper", "none"] = "paper",
+    q: str = "",
+    domain: str = "",
+    sub_tags: str = "",
+    tag_mode: Literal["any", "all"] = "any",
+    venue: str = "",
+    layout: str = "",
+    span: str = "",
+    archetype: str = "",
+    color: str = "",
+    view: Literal["all", "method", "data"] = "all",
+    honors: bool = False,
+    show_cases: bool = False,
+    sort: Literal["newest", "popular"] = "newest",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(16, ge=1, le=100),
+):
+    suffix, args = figure_conditions(
+        q,
+        domain,
+        sub_tags,
+        tag_mode,
+        venue,
+        layout,
+        span,
+        archetype,
+        color,
+        view,
+        honors,
+        show_cases,
+    )
+    base = " FROM figures f JOIN papers p ON p.id=f.paper_id "
+    with connect() as db:
+        db.execute("BEGIN")
+        counts = db.execute(
+            "SELECT COUNT(*) AS figures,COUNT(DISTINCT f.paper_id) AS papers"
+            + base
+            + suffix,
+            args,
+        ).fetchone()
+        if group_by == "none":
+            order = "p.hf_upvotes DESC," if sort == "popular" else ""
+            rows = db.execute(
+                SELECT
+                + suffix
+                + " ORDER BY "
+                + order
+                + "f.created_at DESC,f.id DESC LIMIT ? OFFSET ?",
+                args + [limit, offset],
+            ).fetchall()
+            items = [feed_figure(row) for row in rows]
+            total = counts["figures"]
+        else:
+            order = "MAX(p.hf_upvotes) DESC," if sort == "popular" else ""
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT f.paper_id"
+                    + base
+                    + suffix
+                    + " GROUP BY f.paper_id ORDER BY "
+                    + order
+                    + "MAX(f.created_at) DESC,f.paper_id DESC LIMIT ? OFFSET ?",
+                    args + [limit, offset],
+                )
+            ]
+            rows = []
+            if ids:
+                restricted = (
+                    suffix
+                    + (" AND " if suffix else "WHERE ")
+                    + "f.paper_id IN ("
+                    + ",".join("?" for _ in ids)
+                    + ")"
+                )
+                rows = db.execute(SELECT + restricted, args + ids).fetchall()
+            groups = {pid: [] for pid in ids}
+            for row in rows:
+                groups[row["paper_id"]].append(feed_figure(row))
+            rank = {
+                "Framework": 0,
+                "Pipeline": 0,
+                "Teaser": 1,
+                "Motivation": 1,
+                "Micro-Mechanism": 2,
+                "Curve": 3,
+                "Bar": 3,
+                "Scatter/Radar": 3,
+                "Heatmap": 3,
+            }
+            items = []
+            for pid, figures in groups.items():
+                figures.sort(key=figure_number)
+                hero = min(
+                    figures,
+                    key=lambda f: (rank.get(f["archetype"], 4), figure_number(f)),
+                )
+                paper = {
+                    key: hero[key]
+                    for key in (
+                        "title",
+                        "authors",
+                        "abstract",
+                        "venue",
+                        "venue_year",
+                        "venue_tier",
+                        "hf_upvotes",
+                        "layout_type",
+                        "source_urls",
+                        "domains",
+                        "arxiv_id",
+                    )
+                }
+                paper["id"] = pid
+                items.append(
+                    {
+                        "paper": paper,
+                        "hero_figure_id": hero["id"],
+                        "matched_figures": figures,
+                    }
+                )
+            total = counts["papers"]
+    return {
+        "group_by": group_by,
+        "items": items,
+        "total": total,
+        "total_papers": counts["papers"],
+        "total_figures": counts["figures"],
+        "next_offset": offset + len(items) if offset + len(items) < total else None,
+    }
+
+
+@router.get("/papers/{pid}/figures")
+def sibling_figures(pid: str):
+    with connect() as db:
+        if not db.execute("SELECT id FROM papers WHERE id=?", (pid,)).fetchone():
+            raise HTTPException(404, "论文不存在")
+        figures = [feed_figure(r) for r in db.execute(SELECT + "WHERE p.id=?", (pid,))]
+    figures.sort(key=figure_number)
+    return {"paper_id": pid, "items": figures}
 
 
 @router.get("/figures/{fid}")
@@ -595,6 +786,35 @@ def save_item(cid: str, body: CollectionItem, user=Depends(require_user)):
             "UPDATE collections SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (cid,)
         )
     return {"ok": True}
+
+
+class BulkCollectionItems(BaseModel):
+    figure_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+@router.put("/collections/{cid}/items/bulk")
+def save_items(cid: str, body: BulkCollectionItems, user=Depends(require_user)):
+    ids = list(dict.fromkeys(body.figure_ids))
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        owned_collection(db, cid, user["id"])
+        found = db.execute(
+            "SELECT COUNT(*) FROM figures WHERE id IN ("
+            + ",".join("?" for _ in ids)
+            + ")",
+            ids,
+        ).fetchone()[0]
+        if found != len(ids):
+            raise HTTPException(404, "部分图表已不存在")
+        for fid in ids:
+            db.execute(
+                "INSERT OR IGNORE INTO collection_items(id,collection_id,figure_id) VALUES(?,?,?)",
+                (uuid.uuid4().hex, cid, fid),
+            )
+        db.execute(
+            "UPDATE collections SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (cid,)
+        )
+    return {"ok": True, "count": len(ids)}
 
 
 @router.delete("/collections/{cid}/items/{fid}")
