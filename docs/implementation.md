@@ -41,3 +41,9 @@ Backend tests exercise revoked sessions, invitation single use, cross-origin rej
 - Temporary QA account and its private records were removed after verification; connectivity probe files were removed from WebDAV.
 
 Runtime test reports and screenshots are in ignored `data/qa/`; private credentials are never part of deployment source or image layers.
+
+## Short hostname migration — 2026-11-14
+
+Primary URL changed to `https://fig.zhcanfly.com`. The new Cloudflare A record points to the same local server with `proxied=false`; a dedicated Let's Encrypt certificate is installed. Both HTTP and HTTPS requests to `figprsim.zhcanfly.com` return 308 to the new host while preserving the path and query string. The old hostname and its certificate remain available for these redirects (`deploy/nginx.legacy.conf`).
+
+The backend public origin, private local configuration, administrator access file, Compose environment and deployment documentation now use the short hostname. The backend was recreated successfully without changing the database. Live checks passed for public pages, health, authenticated login, Secure/HttpOnly cookies, cross-origin write rejection, and path/query-preserving redirects. A browser smoke check verified the old-to-new navigation and gallery image loading.

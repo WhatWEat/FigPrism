@@ -11,7 +11,7 @@ services:
       - ./config:/app/config
       - ./data:/app/data
     environment:
-      FIGPRISM_PUBLIC_ORIGIN: https://figprsim.zhcanfly.com
+      FIGPRISM_PUBLIC_ORIGIN: https://fig.zhcanfly.com
       FIGPRISM_COOKIE_SECURE: "true"
       FIGPRISM_CONFIG: /app/config/local.yaml
       FIGPRISM_DATA_DIR: /app/data
