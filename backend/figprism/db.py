@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS papers (
  source_type TEXT DEFAULT 'upload', arxiv_id TEXT, venue TEXT DEFAULT 'Preprint', venue_year INTEGER,
  venue_tier TEXT, hf_upvotes INTEGER DEFAULT 0, layout_type TEXT DEFAULT 'single',
  source_urls TEXT DEFAULT '{}', domains TEXT DEFAULT '[]', webdav_pdf_path TEXT,
- uploaded_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+ ingest_status TEXT DEFAULT 'completed', uploaded_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS figures (
  id TEXT PRIMARY KEY, paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
  fig_label TEXT NOT NULL, page_number INTEGER NOT NULL, bbox TEXT NOT NULL,
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS repair_queue (id TEXT PRIMARY KEY, figure_id TEXT NOT
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
+
 @contextmanager
 def connect():
     db = sqlite3.connect(get_settings().data_dir / "figprism.db", timeout=30)
@@ -58,20 +59,41 @@ def connect():
     finally:
         db.close()
 
-def init_db():
+
+def init_db(recover_jobs=False):
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
-        columns={r[1] for r in db.execute("PRAGMA table_info(figures)")}
+        columns = {r[1] for r in db.execute("PRAGMA table_info(figures)")}
         if "sub_tags" not in columns:
             db.execute("ALTER TABLE figures ADD COLUMN sub_tags TEXT DEFAULT '[]'")
+        pcolumns = {r[1] for r in db.execute("PRAGMA table_info(papers)")}
+        if "ingest_status" not in pcolumns:
+            db.execute(
+                "ALTER TABLE papers ADD COLUMN ingest_status TEXT DEFAULT 'completed'"
+            )
         path = get_settings().domains_file
         if path.exists():
             for domain in yaml.safe_load(path.read_text()) or []:
-                db.execute("INSERT OR IGNORE INTO domains(slug,config,is_active) VALUES(?,?,?)", (domain["slug"], json.dumps(domain, ensure_ascii=False), int(domain.get("is_active", True))))
+                db.execute(
+                    "INSERT INTO domains(slug,config,is_active) VALUES(?,?,?) ON CONFLICT(slug) DO UPDATE SET config=excluded.config,is_active=excluded.is_active",
+                    (
+                        domain["slug"],
+                        json.dumps(domain, ensure_ascii=False),
+                        int(domain.get("is_active", True)),
+                    ),
+                )
         # A process restart cannot leave uploads permanently marked as running.
-        db.execute("UPDATE jobs SET status='failed', message='服务重启，请重试任务' WHERE status IN ('running','queued')")
+        if recover_jobs:
+            db.execute(
+                "UPDATE jobs SET status='failed', message='服务重启，请重试任务' WHERE status IN ('running','queued') AND user_id IS NOT NULL"
+            )
+
 
 def event(db, kind, payload):
-    db.execute("INSERT INTO events(kind,payload) VALUES(?,?)", (kind, json.dumps(payload)))
-    db.execute("DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM events)")
+    db.execute(
+        "INSERT INTO events(kind,payload) VALUES(?,?)", (kind, json.dumps(payload))
+    )
+    db.execute(
+        "DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM events)"
+    )

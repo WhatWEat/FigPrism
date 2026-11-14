@@ -12,7 +12,7 @@ dependencies = [
   "pydantic-settings>=2.7,<3", "pyyaml>=6,<7", "PyJWT>=2.10,<3",
   "argon2-cffi>=23,<26", "python-multipart>=0.0.20,<1", "pymupdf>=1.25,<2",
   "Pillow>=11,<13", "numpy>=2,<3", "defusedxml>=0.7,<1", "typer>=0.15,<1",
-  "blurhash>=1.1,<2"
+  "blurhash>=1.1,<2", "onnxruntime>=1.20,<2", "opencv-python-headless>=4.10,<5"
 ]
 [project.optional-dependencies]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2"]
@@ -25,3 +25,5 @@ include = ["figprism*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+asyncio_default_fixture_loop_scope = "function"

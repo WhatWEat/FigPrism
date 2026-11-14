@@ -5,7 +5,8 @@ import secrets
 from pydantic import BaseModel, Field, SecretStr
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("FIGPRISM_ROOT", Path(__file__).resolve().parents[2]))
+
 
 class WebDAVConfig(BaseModel):
     url: str = ""
@@ -13,11 +14,13 @@ class WebDAVConfig(BaseModel):
     password: SecretStr = SecretStr("")
     root: str = "/figprism"
 
+
 class VisionConfig(BaseModel):
     driver: str = "codex_subagent"
     base_url: str = "https://api.openai.com/v1"
     api_key: SecretStr = SecretStr("")
     model: str = "gpt-4.1-mini"
+
 
 class Settings(BaseModel):
     data_dir: Path = ROOT / "data"
@@ -32,12 +35,18 @@ class Settings(BaseModel):
     cache_max_bytes: int = 2 * 1024**3
     max_pdf_bytes: int = 50 * 1024**2
 
+
 @lru_cache
 def get_settings():
     path = Path(os.environ.get("FIGPRISM_CONFIG", ROOT / "config/local.yaml"))
     values = yaml.safe_load(path.read_text()) if path.exists() else {}
     values = values or {}
-    for env, key in [("FIGPRISM_DATA_DIR", "data_dir"), ("FIGPRISM_SECRET_KEY", "secret_key"), ("FIGPRISM_PUBLIC_ORIGIN", "public_origin")]:
+    for env, key in [
+        ("FIGPRISM_DATA_DIR", "data_dir"),
+        ("FIGPRISM_SECRET_KEY", "secret_key"),
+        ("FIGPRISM_PUBLIC_ORIGIN", "public_origin"),
+        ("FIGPRISM_LAYOUT_MODEL", "layout_model"),
+    ]:
         if os.environ.get(env):
             values[key] = os.environ[env]
     if "FIGPRISM_COOKIE_SECURE" in os.environ:
