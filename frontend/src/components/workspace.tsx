@@ -482,6 +482,15 @@ type AdminInfo = {
   vision_driver: string;
   vision_model: string;
 };
+const stageLabels: Record<string, string> = {
+  metadata: "元数据查询",
+  download: "论文下载",
+  papers: "论文处理",
+  cpu: "PDF 计算",
+  vision: "视觉判图",
+  upload: "WebDAV 上传",
+  figures: "在途图表",
+};
 export function AdminPage() {
   const user = useUser().data?.user;
   const ui = useUI();
@@ -497,6 +506,15 @@ export function AdminPage() {
     queryKey: ["admin"],
     queryFn: () => api<AdminInfo>("/admin/overview"),
     enabled: user?.role === "admin",
+  });
+  const stages = useQuery({
+    queryKey: ["pipeline"],
+    queryFn: () =>
+      api<{ stages: Record<string, { limit: number; active: number }> }>(
+        "/admin/pipeline",
+      ),
+    enabled: user?.role === "admin",
+    refetchInterval: 3000,
   });
   if (!user) return <SignInGate title="系统控制中心" />;
   if (user.role !== "admin")
@@ -544,6 +562,18 @@ export function AdminPage() {
             <p>
               增量同步 HF 高热论文与 arXiv 顶会论文，或回溯 2025–2026 代表作。
             </p>
+            {stages.data && (
+              <div className="domain-list" aria-label="阶段并发状态">
+                {Object.entries(stages.data.stages).map(([key, value]) => (
+                  <div key={key}>
+                    <strong>{stageLabels[key] || key}</strong>
+                    <span>
+                      运行 {value.active} / 上限 {value.limit}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="form">
               <label>
                 目标领域

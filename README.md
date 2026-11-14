@@ -101,6 +101,34 @@ E2E_BASE_URL=https://fig.zhcanfly.com npm run test:e2e --prefix frontend
 - 首批内容为真实论文，未核验的会议标记保留 Preprint。2025–2026 全量代表作需按需运行 backfill，默认不一次性下载每领域 50 篇。
 - WebDAV 备份覆盖论文/图表元数据及资产；**账号、会话、私有看板和历史只在 SQLite**，迁移时还需安全备份数据库与 `config/local.yaml`。不要只依赖资产重建恢复账号。
 
+## 分阶段并发控制
+
+`config/local.yaml` 的 `pipeline` 段控制以下共享限额，示例见 `config/settings.example.yaml`：
+
+| 阶段 | 默认并发 |
+| --- | ---: |
+| 元数据召回、会议核验 | 4 |
+| PDF / TeX 下载 | 3 |
+| 同时处理论文 | 2 |
+| PDF 计算子进程 | 2（每进程 1 个 ONNX 线程） |
+| 视觉判图请求 | 3 |
+| WebDAV 上传请求 | 4 |
+| 全局在途图表 | 6（每篇最多 3 张） |
+
+网页、CLI 和定时任务通过共享数据卷中的内核文件锁使用同一套限额。PDF 原文上传与版面分析重叠，图表渲染、判图、上传交错执行；公开图表前等待原文和该图全部资产持久化。相同 PDF/论文身份串行去重；重切只锁目标图表；WebDAV 元数据备份按论文串行并合并重复快照。恢复全库时使用独占维护锁。
+
+arXiv 起始请求间隔跨进程保持至少 3 秒。瞬时网络错误及 408/425/429/5xx 按有限次数重试并尊重 Retry-After；权限错误直接失败。取消任务会终止计算子进程，保留已发布图表；重新提交失败论文时跳过已有图表，不会重复插入。网页最多接纳 12 个顶层待处理任务，每用户仍限 3 个。
+
+管理员页面显示每阶段实时运行数和上限，也可运行：
+
+```bash
+docker compose exec backend figprism pipeline status
+```
+
+调整 `pipeline` 后，应在任务结束后重启后端，并重启/重新运行正在使用旧配置的 CLI 或定时任务，保证所有进程使用一致的限额。CPU 渲染使用独立短生命周期进程，避免 PyMuPDF 在线程之间共享对象；进程启动有少量开销，但内存可随计算完成释放。
+
+可用 `.venv/bin/python scripts/benchmark_pipeline.py` 运行不访问外网的调度基准。固定模拟延迟下，3 篇 / 18 张图的单路模式为 5.95 秒，新并发配置为 2.54 秒，约 2.34 倍；这不是生产网络吞吐保证。
+
 技术依据及第三方组件见 [docs/implementation.md](docs/implementation.md)。
 
 首批真实论文导入由本机 `figprism-bootstrap.service` 托管，可用 `journalctl -u figprism-bootstrap -f` 查看进度。它不影响浏览；远端资产成功保存后，图表逐张出现在首页。该一次性导入结束后无需常驻，日常更新由上述 timer 承担。
