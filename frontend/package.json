@@ -19,7 +19,8 @@
     "blurhash": "^2.0.5",
     "@radix-ui/react-dialog": "^1.1.15",
     "tailwindcss": "^4.1.0",
-    "@tailwindcss/postcss": "^4.1.0"
+    "@tailwindcss/postcss": "^4.1.0",
+    "katex": "^0.19.1"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useQuery,
   useQueryClient,
@@ -35,6 +35,11 @@ import { Modal, Spinner, ErrorMessage, useUser, copyColor } from "./ui";
 import { quickSave } from "./figure-card";
 import { SiblingFigures } from "./paper-groups";
 import { useInspectorImage } from "@/lib/use-inspector-image";
+
+import { useInspectorViewport } from "@/lib/use-inspector-viewport";
+import { ZoomRail } from "./zoom-rail";
+import { RichCaption } from "./rich-caption";
+const EMPTY_BOARDS: Board[] = [];
 
 export function Inspector({ ids }: { ids: string[] }) {
   const ui = useUI();
@@ -78,7 +83,6 @@ export function Inspector({ ids }: { ids: string[] }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [hover, setHover] = useState(false);
   const [picker, setPicker] = useState(false);
-  const [zoom, setZoom] = useState(1);
   const [serif, setSerif] = useState(false);
   const [format, setFormat] = useState("HEX");
   const [board, setBoard] = useState("");
@@ -100,6 +104,7 @@ export function Inspector({ ids }: { ids: string[] }) {
   }, [cropping, picture.ready, picture.error, isSwitching, ui.selectedId]);
 
   const [codeOpen, setCodeOpen] = useState(false);
+  const {zoom,zoomRef,applyZoom,resetZoom,stageRef,attachScroll,stageWidthPx} = useInspectorViewport(f?.width && f?.height ? f.width / f.height : f?.aspect_ratio || 1.4,ui.selectedId,!cropping);
   const img = picture.imageRef;
   const pixelCanvas = useRef<HTMLCanvasElement | null>(null);
   const loupe = useRef<HTMLCanvasElement>(null);
@@ -115,12 +120,11 @@ export function Inspector({ ids }: { ids: string[] }) {
       queryKey: ["boards"],
       queryFn: () => api<Board[]>("/collections"),
       enabled: !!user && !!ui.selectedId,
-    }).data || [];
+    }).data || EMPTY_BOARDS;
   useEffect(() => {
     setFocus(ui.selectedContext?.focus || null);
     setNote(ui.selectedContext?.note || "");
     if (ui.selectedContext?.boardId) setBoard(ui.selectedContext.boardId);
-    setZoom(1);
     setPicker(false);
     setCropping(false);
     setCodeOpen(false);
@@ -202,7 +206,7 @@ export function Inspector({ ids }: { ids: string[] }) {
       }
       if (e.code === "Space") {
         e.preventDefault();
-        setZoom((z) => (z === 1 ? 1.8 : 1));
+        applyZoom(zoomRef.current === 1 ? 1.8 : 1);
       }
       if (e.key.toLowerCase() === "i" && picture.ready && !cropping)
         setPicker((v) => !v);
@@ -355,245 +359,12 @@ export function Inspector({ ids }: { ids: string[] }) {
   const palette = focused?.palette || f?.palette;
   const colors = palette?.colors.map((c) => c.hex) || [];
   const exportText = paletteCode(colors, format);
-  return (
-    <Modal
-      open={!!ui.selectedId}
-      onOpenChange={(open) => {
-        if (!open) ui.select(null);
-      }}
-      title={f ? `${f.fig_label} · 图表检视器` : "图表检视器"}
-      className="inspector-modal"
-    >
-      {result.isPending ? (
-        <div className="inspector-loading">
-          <Spinner />
-          正在加载图表
-        </div>
-      ) : result.error ? (
-        <ErrorMessage error={result.error} retry={() => result.refetch()} />
-      ) : (
-        f && (
-          <div className="inspector-body">
-            <section className="inspector-canvas">
-              <div className="canvas-top">
-                <div className="capsule">
-                  <button
-                    onClick={() => navigate(-1)}
-                    aria-label="上一张图表"
-                    disabled={navigationIds.indexOf(f.id) <= 0}
-                  >
-                    <ArrowLeft size={16} />
-                  </button>
-                  <span>{f.fig_label}</span>
-                  <button
-                    onClick={() => navigate(1)}
-                    aria-label="下一张图表"
-                    disabled={
-                      navigationIds.indexOf(f.id) >= navigationIds.length - 1
-                    }
-                  >
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
-                <div className="capsule">
-                  <button
-                    className={picker ? "active" : ""}
-                    onClick={() => {
-                      setPicker(!picker);
-                      setPoint(null);
-                    }}
-                    title="吸管取色 (I)"
-                    aria-label="吸管取色"
-                    disabled={!picture.ready || cropping}
-                  >
-                    <Pipette size={16} />
-                  </button>
-                  <i />
-                  <button
-                    onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
-                    aria-label="缩小"
-                  >
-                    <Minus size={15} />
-                  </button>
-                  <span className="mono">{Math.round(zoom * 100)}%</span>
-                  <button
-                    onClick={() => setZoom(Math.min(4, zoom + 0.25))}
-                    aria-label="放大"
-                  >
-                    <Plus size={15} />
-                  </button>
-                  <button onClick={() => setZoom(1)} title="适应窗口">
-                    <Focus size={16} />
-                  </button>
-                </div>
-              </div>
-              {!cropping &&
-                showLoadingNotice &&
-                (!picture.ready || isSwitching) && (
-                  <div
-                    className="image-load-status"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {(!picture.error || isSwitching) && <Spinner />}
-                    <div>
-                      <strong>
-                        {isSwitching
-                          ? "正在读取图表"
-                          : picture.error
-                            ? "高清图暂时无法加载"
-                            : "高清图加载中"}
-                      </strong>
-                      <span>
-                        {isSwitching
-                          ? "正在准备下一张图片"
-                          : picture.visible?.id === f.id
-                            ? `${f.fig_label} · 当前显示预览`
-                            : `正在切换到 ${f.fig_label}`}
-                      </span>
-                    </div>
-                    {picture.error && !isSwitching && (
-                      <button onClick={picture.retry}>重试</button>
-                    )}
-                  </div>
-                )}
-              {cropping ? (
-                <CropEditor
-                  figure={f}
-                  onDone={() => {
-                    setCropping(false);
-                    cache.invalidateQueries({ queryKey: ["figure", f.id] });
-                    cache.invalidateQueries({ queryKey: ["figures"] });
-                    cache.invalidateQueries({ queryKey: ["siblings"] });
-                  }}
-                  onCancel={() => setCropping(false)}
-                />
-              ) : (
-                <>
-                  <div className="canvas-scroll">
-                    <div
-                      className={`image-stage ${picker ? "picking" : ""}`}
-                      onPointerMove={move}
-                      onPointerLeave={() => setPoint(null)}
-                      onClick={() => {
-                        if (picker && point && picture.ready)
-                          void copyColor(point.hex, f.id, user);
-                      }}
-                      style={{
-                        width: `${zoom * 100}%`,
-                        minWidth: zoom > 1 ? `${zoom * 100}%` : undefined,
-                      }}
-                    >
-                      <div className="image-wrap">
-                        <img
-                          ref={img}
-                          className="fig-paper-blend"
-                          src={picture.visible?.src || f.thumb_url}
-                          alt={picture.visible?.alt || f.title}
-                          data-figure-id={picture.visible?.id || f.id}
-                          data-resolution={picture.ready ? "hd" : "preview"}
-                          onLoad={picture.onLoad}
-                          onError={picture.onError}
-                          draggable={false}
-                        />
-                        {focused && picture.visible?.id === f.id && (
-                          <div
-                            className="spotlight"
-                            style={{
-                              left: `${focused.norm_bbox[0] * 100}%`,
-                              top: `${focused.norm_bbox[1] * 100}%`,
-                              width: `${(focused.norm_bbox[2] - focused.norm_bbox[0]) * 100}%`,
-                              height: `${(focused.norm_bbox[3] - focused.norm_bbox[1]) * 100}%`,
-                            }}
-                          />
-                        )}
-                      </div>
-                      {point && picker && picture.ready && (
-                        <div
-                          className="loupe"
-                          style={{
-                            left: Math.max(0, point.x - 56),
-                            top: point.y - 150,
-                          }}
-                        >
-                          <canvas width={112} height={112} ref={loupe} />
-                          <span>{point.hex}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {f.subitems.length > 1 && (
-                    <div className="sub-controls">
-                      <div className="capsule">
-                        <button
-                          className={!focus ? "active" : ""}
-                          onClick={() => setFocus(null)}
-                        >
-                          整图
-                        </button>
-                        {f.subitems.map((s) => (
-                          <button
-                            key={s.id}
-                            className={focus === s.id ? "active" : ""}
-                            onClick={() => setFocus(s.id)}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
-                        <i />
-                        <button
-                          onClick={() => setHover(!hover)}
-                          className={hover ? "active" : ""}
-                          title="悬停热区感应"
-                        >
-                          <MousePointer2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <SiblingFigures
-                    figures={siblings}
-                    currentId={f.id}
-                    onSelect={selectInInspector}
-                    scopeLabel={feedQuery ? feedLabel : undefined}
-                    showAll={showAll}
-                    totalCount={siblingQuery.data?.total}
-                    matchedIds={feedQuery ? matchedIds : undefined}
-                    onToggleScope={toggleScope}
-                    loading={
-                      siblingQuery.isPending || (showAll && allQuery.isPending)
-                    }
-                  />
-                  <div className="canvas-bottom">
-                    <span>
-                      <span className="keycap">I</span> 取色{" "}
-                      <span className="keycap">← →</span> 切图{" "}
-                      <span className="keycap">Space</span> 缩放
-                    </span>
-                    {user && (
-                      <div>
-                        <button
-                          className="button small"
-                          onClick={() => setCropping(true)}
-                        >
-                          <Scissors size={14} />
-                          框选重切
-                        </button>
-                        <button className="button small" onClick={repair}>
-                          <Sparkles size={14} />
-                          请求精修
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </section>
+  const sidebar = useMemo(() => f ? (
             <aside
               className="inspector-sidebar"
               aria-busy={isSwitching}
-              inert={isSwitching}
             >
+              {isSwitching ? <div className="detail-loading" role="status"><Spinner/><strong>正在加载当前图表详情</strong><div className="detail-skeleton"/><div className="detail-skeleton"/></div> : <>
               <div className="paper-heading">
                 <div className="eyebrow">
                   THE PAPER{" "}
@@ -661,21 +432,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                   </button>
                 </div>
                 <p className={`caption-text ${serif ? "serif" : ""}`}>
-                  {(focused?.caption || f.caption || "暂无图注")
-                    .split(/(\([a-i]\))/g)
-                    .map((s, i) =>
-                      /^\([a-i]\)$/.test(s) ? (
-                        <button
-                          key={i}
-                          className="caption-anchor"
-                          onClick={() => setFocus(s[1])}
-                        >
-                          {s}
-                        </button>
-                      ) : (
-                        s
-                      ),
-                    )}
+                  <RichCaption text={focused?.caption || f.caption || "暂无图注"} onFocus={setFocus}/>
                 </p>
                 {f.review_status !== "ok" && (
                   <p className="review-note">
@@ -942,7 +699,244 @@ export function Inspector({ ids }: { ids: string[] }) {
                   {user ? "保存至看板" : "登录并收藏"}
                 </button>
               </section>
+              </>}
             </aside>
+  ) : null, [f,isSwitching,user,focus,serif,format,board,note,saving,codeOpen,boards,feedQuery,feedLabel,siblingQuery.data,ui,cache]);
+  return (
+    <Modal
+      open={!!ui.selectedId}
+      onOpenChange={(open) => {
+        if (!open) ui.select(null);
+      }}
+      title={f ? `${f.fig_label} · 图表检视器` : "图表检视器"}
+      className="inspector-modal"
+    >
+      {result.isPending ? (
+        <div className="inspector-loading">
+          <Spinner />
+          正在加载图表
+        </div>
+      ) : result.error ? (
+        <ErrorMessage error={result.error} retry={() => result.refetch()} />
+      ) : (
+        f && (
+          <div className="inspector-body">
+            <section className="inspector-canvas">
+              <div className="canvas-top">
+                <div className="capsule">
+                  <button
+                    onClick={() => navigate(-1)}
+                    aria-label="上一张图表"
+                    disabled={navigationIds.indexOf(f.id) <= 0}
+                  >
+                    <ArrowLeft size={16} />
+                  </button>
+                  <span>{f.fig_label}</span>
+                  <button
+                    onClick={() => navigate(1)}
+                    aria-label="下一张图表"
+                    disabled={
+                      navigationIds.indexOf(f.id) >= navigationIds.length - 1
+                    }
+                  >
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+                <div className="capsule">
+                  <button
+                    className={picker ? "active" : ""}
+                    onClick={() => {
+                      setPicker(!picker);
+                      setPoint(null);
+                    }}
+                    title="吸管取色 (I)"
+                    aria-label="吸管取色"
+                    disabled={!picture.ready || cropping}
+                  >
+                    <Pipette size={16} />
+                  </button>
+                  <i />
+                  <button
+                    onClick={() => applyZoom(zoom - 0.25)}
+                    aria-label="缩小"
+                  >
+                    <Minus size={15} />
+                  </button>
+                  <span className="mono">{Math.round(zoom * 100)}%</span>
+                  <button
+                    onClick={() => applyZoom(zoom + 0.25)}
+                    aria-label="放大"
+                  >
+                    <Plus size={15} />
+                  </button>
+                  <button onClick={resetZoom} title="适应窗口" aria-label="适应窗口">
+                    <Focus size={16} />
+                  </button>
+                </div>
+              </div>
+              {!cropping &&
+                showLoadingNotice &&
+                (!picture.ready || isSwitching) && (
+                  <div
+                    className="image-load-status"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {(!picture.error || isSwitching) && <Spinner />}
+                    <div>
+                      <strong>
+                        {isSwitching
+                          ? "正在读取图表"
+                          : picture.error
+                            ? "高清图暂时无法加载"
+                            : "高清图加载中"}
+                      </strong>
+                      <span>
+                        {isSwitching
+                          ? "正在准备下一张图片"
+                          : picture.visible?.id === f.id
+                            ? `${f.fig_label} · 当前显示预览`
+                            : `正在切换到 ${f.fig_label}`}
+                      </span>
+                    </div>
+                    {picture.error && !isSwitching && (
+                      <button onClick={picture.retry}>重试</button>
+                    )}
+                  </div>
+                )}
+              {cropping ? (
+                <CropEditor
+                  figure={f}
+                  onDone={() => {
+                    setCropping(false);
+                    cache.invalidateQueries({ queryKey: ["figure", f.id] });
+                    cache.invalidateQueries({ queryKey: ["figures"] });
+                    cache.invalidateQueries({ queryKey: ["siblings"] });
+                  }}
+                  onCancel={() => setCropping(false)}
+                />
+              ) : (
+                <>
+                  <ZoomRail zoom={zoom} onZoom={applyZoom} onFit={resetZoom}/>
+                  <div ref={attachScroll} className="canvas-scroll">
+                    <div
+                      ref={stageRef}
+                      className={`image-stage ${picker ? "picking" : ""}`}
+                      onPointerMove={move}
+                      onPointerLeave={() => setPoint(null)}
+                      onClick={() => {
+                        if (picker && point && picture.ready)
+                          void copyColor(point.hex, f.id, user);
+                      }}
+                      style={stageWidthPx ? {width:`${stageWidthPx}px`} : {maxWidth:"100%",maxHeight:"100%"}}
+                    >
+                      <div className="image-wrap" style={{aspectRatio:f.width && f.height ? f.width / f.height : f.aspect_ratio || 1.4}}>
+                        <img
+                          ref={img}
+                          className="fig-paper-blend"
+                          style={{height:"100%",objectFit:"contain"}}
+                          src={picture.visible?.src || f.thumb_url}
+                          alt={picture.visible?.alt || f.title}
+                          data-figure-id={picture.visible?.id || f.id}
+                          data-resolution={picture.ready ? "hd" : "preview"}
+                          onLoad={picture.onLoad}
+                          onError={picture.onError}
+                          draggable={false}
+                        />
+                        {focused && picture.visible?.id === f.id && (
+                          <div
+                            className="spotlight"
+                            style={{
+                              left: `${focused.norm_bbox[0] * 100}%`,
+                              top: `${focused.norm_bbox[1] * 100}%`,
+                              width: `${(focused.norm_bbox[2] - focused.norm_bbox[0]) * 100}%`,
+                              height: `${(focused.norm_bbox[3] - focused.norm_bbox[1]) * 100}%`,
+                            }}
+                          />
+                        )}
+                      </div>
+                      {point && picker && picture.ready && (
+                        <div
+                          className="loupe"
+                          style={{
+                            left: Math.max(0, point.x - 56),
+                            top: point.y - 150,
+                          }}
+                        >
+                          <canvas width={112} height={112} ref={loupe} />
+                          <span>{point.hex}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {f.subitems.length > 1 && (
+                    <div className="sub-controls">
+                      <div className="capsule">
+                        <button
+                          className={!focus ? "active" : ""}
+                          onClick={() => setFocus(null)}
+                        >
+                          整图
+                        </button>
+                        {f.subitems.map((s) => (
+                          <button
+                            key={s.id}
+                            className={focus === s.id ? "active" : ""}
+                            onClick={() => setFocus(s.id)}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                        <i />
+                        <button
+                          onClick={() => setHover(!hover)}
+                          className={hover ? "active" : ""}
+                          title="悬停热区感应"
+                        >
+                          <MousePointer2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <SiblingFigures
+                    figures={siblings}
+                    currentId={f.id}
+                    onSelect={selectInInspector}
+                    scopeLabel={feedQuery ? feedLabel : undefined}
+                    showAll={showAll}
+                    totalCount={siblingQuery.data?.total}
+                    matchedIds={feedQuery ? matchedIds : undefined}
+                    onToggleScope={toggleScope}
+                    loading={
+                      siblingQuery.isPending || (showAll && allQuery.isPending)
+                    }
+                  />
+                  <div className="canvas-bottom">
+                    <span>
+                      <span className="keycap">I</span> 取色{" "}
+                      <span className="keycap">← →</span> 切图{" "}
+                      <span className="keycap">Space</span> 缩放
+                    </span>
+                    {user && (
+                      <div>
+                        <button
+                          className="button small"
+                          onClick={() => setCropping(true)}
+                        >
+                          <Scissors size={14} />
+                          框选重切
+                        </button>
+                        <button className="button small" onClick={repair}>
+                          <Sparkles size={14} />
+                          请求精修
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+            {sidebar}
           </div>
         )
       )}
