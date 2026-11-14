@@ -385,13 +385,53 @@ def figure_feed(
 
 
 @router.get("/papers/{pid}/figures")
-def sibling_figures(pid: str):
+def sibling_figures(
+    pid: str,
+    q: str = "",
+    domain: str = "",
+    sub_tags: str = "",
+    tag_mode: Literal["any", "all"] = "any",
+    venue: str = "",
+    layout: str = "",
+    span: str = "",
+    archetype: str = "",
+    color: str = "",
+    view: Literal["all", "method", "data"] = "all",
+    honors: bool = False,
+    show_cases: bool = True,
+):
+    suffix, args = figure_conditions(
+        q,
+        domain,
+        sub_tags,
+        tag_mode,
+        venue,
+        layout,
+        span,
+        archetype,
+        color,
+        view,
+        honors,
+        show_cases,
+    )
+    suffix += (" AND " if suffix else "WHERE ") + "p.id=?"
     with connect() as db:
+        db.execute("BEGIN")
         if not db.execute("SELECT id FROM papers WHERE id=?", (pid,)).fetchone():
             raise HTTPException(404, "论文不存在")
-        figures = [feed_figure(r) for r in db.execute(SELECT + "WHERE p.id=?", (pid,))]
+        total = db.execute(
+            "SELECT COUNT(*) FROM figures WHERE paper_id=?", (pid,)
+        ).fetchone()[0]
+        figures = [
+            feed_figure(row) for row in db.execute(SELECT + suffix, args + [pid])
+        ]
     figures.sort(key=figure_number)
-    return {"paper_id": pid, "items": figures}
+    return {
+        "paper_id": pid,
+        "items": figures,
+        "matched_count": len(figures),
+        "total": total,
+    }
 
 
 @router.get("/figures/{fid}")

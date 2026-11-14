@@ -148,3 +148,28 @@ def test_bulk_collection_requires_owner_and_preserves_notes(library):
         ).status_code
         == 404
     )
+
+
+def test_sibling_filters_preserve_feed_scope_without_page_truncation(library):
+    method = library.get(
+        "/api/papers/paper-a/figures?view=method&show_cases=false&limit=1&offset=99"
+    ).json()
+    assert [f["id"] for f in method["items"]] == ["a1", "a2"]
+    assert method["total"] == 3 and method["matched_count"] == 2
+    data = library.get("/api/papers/paper-a/figures?view=data").json()
+    assert [f["id"] for f in data["items"]] == ["a10"]
+    assert data["total"] == 3 and data["matched_count"] == 1
+    empty = library.get("/api/papers/paper-a/figures?view=method&color=8").json()
+    assert empty["items"] == [] and empty["total"] == 3
+    searched = library.get(
+        "/api/papers/paper-a/figures?q=font:Helvetica%20ratio:%3E1.5&archetype=Pipeline"
+    ).json()
+    assert [f["id"] for f in searched["items"]] == ["a2"]
+    assert library.get("/api/papers/paper-b/figures").json()["matched_count"] == 2
+    assert (
+        library.get("/api/papers/paper-b/figures?show_cases=false").json()[
+            "matched_count"
+        ]
+        == 1
+    )
+    assert library.get("/api/papers/paper-a/figures?view=invalid").status_code == 422
