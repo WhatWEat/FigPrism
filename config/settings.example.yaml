@@ -17,3 +17,17 @@ vision:
 layout_model: null
 hf_min_upvotes: 20
 cache_max_bytes: 2147483648
+# Stage limits are shared across API/CLI/timer processes using the data volume.
+# Restart all coordinators together after changing limits.
+pipeline:
+  metadata: 4
+  download: 3
+  papers: 2
+  cpu: 2
+  cpu_threads: 1
+  vision: 3
+  upload: 4
+  figures: 6 # global cap on rendered figures waiting for downstream stages
+  per_paper_figures: 3
+  retry_attempts: 3
+  arxiv_interval: 3

@@ -22,6 +22,20 @@ class VisionConfig(BaseModel):
     model: str = "gpt-4.1-mini"
 
 
+class PipelineConfig(BaseModel):
+    metadata: int = Field(default=4, ge=1, le=16)
+    download: int = Field(default=3, ge=1, le=8)
+    papers: int = Field(default=2, ge=1, le=4)
+    cpu: int = Field(default=2, ge=1, le=4)
+    cpu_threads: int = Field(default=1, ge=1, le=4)
+    vision: int = Field(default=3, ge=1, le=8)
+    upload: int = Field(default=4, ge=1, le=12)
+    figures: int = Field(default=6, ge=1, le=12)
+    per_paper_figures: int = Field(default=3, ge=1, le=6)
+    retry_attempts: int = Field(default=3, ge=1, le=5)
+    arxiv_interval: float = Field(default=3.0, ge=3, le=60)
+
+
 class Settings(BaseModel):
     data_dir: Path = ROOT / "data"
     domains_file: Path = ROOT / "config/domains.yaml"
@@ -30,6 +44,7 @@ class Settings(BaseModel):
     cookie_secure: bool = False
     webdav: WebDAVConfig = Field(default_factory=WebDAVConfig)
     vision: VisionConfig = Field(default_factory=VisionConfig)
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     layout_model: str | None = None
     hf_min_upvotes: int = 20
     cache_max_bytes: int = 2 * 1024**3

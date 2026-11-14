@@ -6,6 +6,8 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from typing import Literal
 from .config import get_settings
+from .concurrency import stage
+from .retry import retry
 
 ARCHETYPES = [
     "Teaser",
@@ -81,18 +83,21 @@ async def judge(image, caption, domains, driver=None):
         },
         "max_tokens": 1500,
     }
-    async with httpx.AsyncClient(timeout=100) as client:
-        r = await client.post(
-            config.base_url.rstrip("/") + "/chat/completions",
-            headers={"Authorization": "Bearer " + config.api_key.get_secret_value()},
-            json=body,
-        )
-        if r.status_code >= 400:
-            # Never include provider response bodies or credentials in public job logs.
-            raise RuntimeError(
-                f"视觉 API 返回 HTTP {r.status_code}；图表已进入人工复核队列"
-            )
-        result = r.json()["choices"][0]["message"]["content"]
+
+    async def request():
+        async with stage("vision"):
+            async with httpx.AsyncClient(timeout=100) as client:
+                response = await client.post(
+                    config.base_url.rstrip("/") + "/chat/completions",
+                    headers={
+                        "Authorization": "Bearer " + config.api_key.get_secret_value()
+                    },
+                    json=body,
+                )
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"]
+
+    result = await retry(request)
     verdict = Verdict.model_validate_json(result)
     allowed = {tag for d in domains for tag in d.get("sub_tags", [])}
     verdict.sub_tags = [tag for tag in verdict.sub_tags if tag in allowed]

@@ -1,12 +1,15 @@
 """WebDAV is the durable asset store; local thumbnails and bounded HD cache are disposable."""
 
 import asyncio
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote, urlparse
 import httpx
 from defusedxml import ElementTree
 from .config import get_settings
+from .concurrency import stage
+from .retry import retry
 
 
 class Storage:
@@ -14,6 +17,24 @@ class Storage:
         self.settings = get_settings()
         self.config = self.settings.webdav
         self._directories = set()
+        self._client = None
+        self._mkdir_lock = asyncio.Lock()
+
+    async def __aenter__(self):
+        self._client = self.client()
+        return self
+
+    async def __aexit__(self, *args):
+        await self._client.aclose()
+        self._client = None
+
+    @asynccontextmanager
+    async def connection(self):
+        if self._client is not None:
+            yield self._client
+        else:
+            async with self.client() as client:
+                yield client
 
     def validate(self, key):
         p = PurePosixPath(key)
@@ -60,18 +81,19 @@ class Storage:
         self.validate(key)
         if not self.config.url:
             raise RuntimeError("WebDAV is not configured")
-        async with self.client() as client:
-            await self.mkdirs(client, key)
 
-            # Small writes keep each socket operation bounded on slow cross-region WebDAV.
-            async def chunks():
-                for offset in range(0, len(data), 32 * 1024):
-                    yield data[offset : offset + 32 * 1024]
+        async def upload():
+            async with stage("upload"):
+                async with self.connection() as client:
+                    async with self._mkdir_lock:
+                        await self.mkdirs(client, key)
 
-            for attempt in range(3):
-                try:
+                    async def chunks():
+                        for offset in range(0, len(data), 32 * 1024):
+                            yield data[offset : offset + 32 * 1024]
+
                     async with asyncio.timeout(1800):
-                        res = await client.put(
+                        response = await client.put(
                             self.url(key),
                             content=chunks(),
                             headers={
@@ -79,12 +101,9 @@ class Storage:
                                 "Content-Length": str(len(data)),
                             },
                         )
-                        res.raise_for_status()
-                    break
-                except (httpx.TransportError, TimeoutError):
-                    if attempt == 2:
-                        raise
-                    await asyncio.sleep(2**attempt)
+                        response.raise_for_status()
+
+        await retry(upload)
         await self.cache(key, data)
 
     async def cache(self, key, data):
@@ -124,7 +143,7 @@ class Storage:
             return data
         except FileNotFoundError:
             pass
-        async with self.client() as client:
+        async with self.connection() as client:
             res = await client.get(self.url(key))
             res.raise_for_status()
             data = res.content
@@ -132,7 +151,7 @@ class Storage:
         return data
 
     async def list(self, key=""):
-        async with self.client() as client:
+        async with self.connection() as client:
             res = await client.request(
                 "PROPFIND",
                 self.url(key),
