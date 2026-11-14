@@ -126,6 +126,9 @@ test("real figure inspector, color export, keyboard navigation and vector downlo
     dialog.getByRole("heading", { name: "科研配色 PALETTE" }),
   ).toBeVisible();
   const img = dialog.locator(".image-wrap img");
+  await expect(img).toHaveAttribute("data-resolution", "hd", {
+    timeout: 20000,
+  });
   await expect(img).toBeVisible();
   await expect
     .poll(() =>
@@ -178,6 +181,9 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
     .click();
   const dialog = page.getByRole("dialog");
   const image = dialog.locator(".image-wrap img");
+  await expect(image).toHaveAttribute("data-resolution", "hd", {
+    timeout: 20000,
+  });
   await expect
     .poll(() =>
       image.evaluate(

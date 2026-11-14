@@ -143,7 +143,13 @@ export function useHorizontalTrack(count: number, dragEnabled = false) {
   return { ref, remaining };
 }
 
-export function PaperDeckCard({ group }: { group: PaperGroup }) {
+export function PaperDeckCard({
+  group,
+  onSelect,
+}: {
+  group: PaperGroup;
+  onSelect: (id: string) => void;
+}) {
   const ui = useUI();
   const user = useUser().data?.user;
   const [selected, setSelected] = useState(group.hero_figure_id);
@@ -202,7 +208,7 @@ export function PaperDeckCard({ group }: { group: PaperGroup }) {
               <button
                 className="figure-open"
                 aria-label={`查看 ${f.fig_label} ${f.title}`}
-                onClick={() => ui.select(f.id)}
+                onClick={() => onSelect(f.id)}
               >
                 <BlurImage figure={f} />
               </button>
@@ -221,7 +227,7 @@ export function PaperDeckCard({ group }: { group: PaperGroup }) {
             style={{
               aspectRatio: Math.min(2.4, Math.max(1.25, hero.aspect_ratio)),
             }}
-            onClick={() => ui.select(active.id)}
+            onClick={() => onSelect(active.id)}
           >
             <BlurImage key={active.id} figure={active} />
             <span className="deck-hero-label">
@@ -251,7 +257,7 @@ export function PaperDeckCard({ group }: { group: PaperGroup }) {
                       if (e.pointerType === "mouse") setSelected(f.id);
                     }}
                     onFocus={() => setSelected(f.id)}
-                    onClick={() => ui.select(f.id)}
+                    onClick={() => onSelect(f.id)}
                     aria-label={`打开 ${f.fig_label} ${f.title}`}
                     aria-pressed={active.id === f.id}
                     data-figure-id={f.id}
@@ -296,9 +302,11 @@ export function PaperDeckCard({ group }: { group: PaperGroup }) {
 export function PaperSwimlane({
   group,
   domains,
+  onSelect,
 }: {
   group: PaperGroup;
   domains: Domain[];
+  onSelect: (id: string) => void;
 }) {
   const ui = useUI();
   const user = useUser().data?.user;
@@ -381,7 +389,7 @@ export function PaperSwimlane({
             >
               <button
                 className="figure-open"
-                onClick={() => ui.select(f.id)}
+                onClick={() => onSelect(f.id)}
                 aria-label={`查看 ${f.fig_label} ${f.title}`}
               >
                 <BlurImage figure={f} />
@@ -410,10 +418,22 @@ export function SiblingFigures({
   figures,
   currentId,
   onSelect,
+  scopeLabel,
+  showAll = false,
+  totalCount,
+  matchedIds,
+  onToggleScope,
+  loading = false,
 }: {
   figures: Figure[];
   currentId: string;
   onSelect: (id: string) => void;
+  scopeLabel?: string;
+  showAll?: boolean;
+  totalCount?: number;
+  matchedIds?: Set<string>;
+  onToggleScope?: () => void;
+  loading?: boolean;
 }) {
   const track = useHorizontalTrack(figures.length);
   useEffect(() => {
@@ -438,19 +458,37 @@ export function SiblingFigures({
         });
     }
   }, [currentId]);
-  if (figures.length < 2) return null;
+  if (figures.length < 2 && !scopeLabel) return null;
   return (
     <div className="sibling-navigation">
       <div className="sibling-label">
-        <strong>同篇图表</strong>
+        <strong>
+          {scopeLabel
+            ? showAll
+              ? "同篇全部图表"
+              : scopeLabel === "当前筛选"
+                ? "当前筛选图表"
+                : `当前筛选 · ${scopeLabel}`
+            : "同篇图表"}
+        </strong>
         <span>
-          ↑ ↓ 切换 ·{" "}
-          {Math.max(
-            0,
-            figures.findIndex((f) => f.id === currentId),
-          ) + 1}{" "}
-          / {figures.length}
+          {loading
+            ? "读取图表…"
+            : `↑ ↓ 切换 · ${figures.findIndex((f) => f.id === currentId) >= 0 ? figures.findIndex((f) => f.id === currentId) + 1 : "—"} / ${figures.length}`}
         </span>
+        {scopeLabel &&
+          totalCount !== undefined &&
+          totalCount > (matchedIds?.size || 0) && (
+            <button
+              className="text-button sibling-scope-toggle"
+              disabled={loading}
+              onClick={onToggleScope}
+            >
+              {showAll
+                ? `仅看当前筛选（${matchedIds?.size || 0}）`
+                : `查看同篇全部图表（${totalCount}）`}
+            </button>
+          )}
       </div>
       <div className="filmstrip-wrap">
         <div
@@ -463,7 +501,11 @@ export function SiblingFigures({
               key={f.id}
               aria-label={`同文 ${f.fig_label}`}
               aria-current={f.id === currentId ? "true" : undefined}
-              className={f.id === currentId ? "active" : ""}
+              className={`${f.id === currentId ? "active" : ""} ${matchedIds && !matchedIds.has(f.id) ? "outside-filter" : ""}`}
+              data-archetype={f.archetype}
+              data-matched={
+                matchedIds ? String(matchedIds.has(f.id)) : undefined
+              }
               onClick={() => onSelect(f.id)}
             >
               <img
@@ -473,7 +515,13 @@ export function SiblingFigures({
                 loading="lazy"
                 draggable={false}
               />
-              <span>{f.fig_label}</span>
+              <span className="sibling-meta">
+                <strong>{f.fig_label}</strong>
+                <small>
+                  {archetypeNames[f.archetype] || f.archetype}
+                  {matchedIds && !matchedIds.has(f.id) ? " · 其他" : ""}
+                </small>
+              </span>
             </button>
           ))}
         </div>
@@ -487,7 +535,13 @@ export function SiblingFigures({
   );
 }
 
-export function PaperDeckFeed({ groups }: { groups: PaperGroup[] }) {
+export function PaperDeckFeed({
+  groups,
+  onSelect,
+}: {
+  groups: PaperGroup[];
+  onSelect: (id: string) => void;
+}) {
   const [columns, setColumns] = useState(3);
   useEffect(() => {
     const update = () =>
@@ -514,7 +568,11 @@ export function PaperDeckFeed({ groups }: { groups: PaperGroup[] }) {
           {groups
             .filter((_, index) => index % columns === column)
             .map((group) => (
-              <PaperDeckCard key={group.paper.id} group={group} />
+              <PaperDeckCard
+                key={group.paper.id}
+                group={group}
+                onSelect={onSelect}
+              />
             ))}
         </div>
       ))}

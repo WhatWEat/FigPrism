@@ -349,6 +349,16 @@ function Gallery({
       ]),
     ),
   }).toString();
+  const inspectorLabel =
+    view === "method"
+      ? "方法架构图"
+      : view === "data"
+        ? "数据实验图"
+        : filters.archetype
+          ? archetypeNames[filters.archetype] || filters.archetype
+          : "当前筛选";
+  const openFigure = (id: string) =>
+    ui.select(id, { feedQuery: parameters, feedLabel: inspectorLabel });
   const result = useInfiniteQuery({
     queryKey: ["figures", parameters],
     initialPageParam: 0,
@@ -752,7 +762,7 @@ function Gallery({
         </div>
       ) : items.length ? (
         ui.viewMode === "deck" ? (
-          <PaperDeckFeed groups={groups} />
+          <PaperDeckFeed groups={groups} onSelect={openFigure} />
         ) : ui.viewMode === "swimlane" ? (
           <div className="paper-swimlanes">
             {groups.map((group) => (
@@ -760,13 +770,14 @@ function Gallery({
                 key={group.paper.id}
                 group={group}
                 domains={domains.data || []}
+                onSelect={openFigure}
               />
             ))}
           </div>
         ) : (
           <div className="masonry flat-feed">
             {items.map((f) => (
-              <FigureCard key={f.id} figure={f} />
+              <FigureCard key={f.id} figure={f} onSelect={openFigure} />
             ))}
           </div>
         )

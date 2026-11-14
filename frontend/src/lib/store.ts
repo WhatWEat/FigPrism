@@ -3,6 +3,8 @@ type SelectionContext = {
   focus?: string | null;
   note?: string;
   boardId?: string;
+  feedQuery?: string;
+  feedLabel?: string;
 };
 type State = {
   loginOpen: boolean;

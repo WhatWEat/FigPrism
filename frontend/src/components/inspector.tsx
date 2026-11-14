@@ -1,6 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -30,6 +34,7 @@ import { useUI } from "@/lib/store";
 import { Modal, Spinner, ErrorMessage, useUser, copyColor } from "./ui";
 import { quickSave } from "./figure-card";
 import { SiblingFigures } from "./paper-groups";
+import { useInspectorImage } from "@/lib/use-inspector-image";
 
 export function Inspector({ ids }: { ids: string[] }) {
   const ui = useUI();
@@ -39,14 +44,37 @@ export function Inspector({ ids }: { ids: string[] }) {
     queryKey: ["figure", ui.selectedId],
     queryFn: () => api<Figure>(`/figures/${ui.selectedId}`),
     enabled: !!ui.selectedId,
+    placeholderData: keepPreviousData,
   });
   const f = result.data;
+  const feedQuery = ui.selectedContext?.feedQuery;
+  const feedLabel = ui.selectedContext?.feedLabel || "当前筛选";
+  const [showAll, setShowAll] = useState(false);
   const siblingQuery = useQuery({
-    queryKey: ["siblings", f?.paper_id],
-    queryFn: () => api<{ items: Figure[] }>(`/papers/${f?.paper_id}/figures`),
+    queryKey: ["siblings", f?.paper_id, feedQuery || "all"],
+    queryFn: () =>
+      api<{ items: Figure[]; total: number; matched_count: number }>(
+        `/papers/${f?.paper_id}/figures${feedQuery ? "?" + feedQuery : ""}`,
+      ),
     enabled: !!f?.paper_id,
   });
-  const siblings = siblingQuery.data?.items || [];
+  const allQuery = useQuery({
+    queryKey: ["siblings", f?.paper_id, "all"],
+    queryFn: () =>
+      api<{ items: Figure[]; total: number; matched_count: number }>(
+        `/papers/${f?.paper_id}/figures`,
+      ),
+    enabled: !!f?.paper_id && !!feedQuery && showAll,
+  });
+  const matched = siblingQuery.data?.items || [];
+  const siblings =
+    feedQuery && showAll ? allQuery.data?.items || matched : matched;
+  const matchedIds = new Set(matched.map((item) => item.id));
+  const picture = useInspectorImage(f, ui.selectedId);
+  const isSwitching = !!ui.selectedId && f?.id !== ui.selectedId;
+  useEffect(() => {
+    if (!ui.selectedId) setShowAll(false);
+  }, [ui.selectedId]);
   const [focus, setFocus] = useState<string | null>(null);
   const [hover, setHover] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -58,8 +86,7 @@ export function Inspector({ ids }: { ids: string[] }) {
   const [saving, setSaving] = useState(false);
   const [cropping, setCropping] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
-  const [imageError, setImageError] = useState(false);
-  const img = useRef<HTMLImageElement>(null);
+  const img = picture.imageRef;
   const pixelCanvas = useRef<HTMLCanvasElement | null>(null);
   const loupe = useRef<HTMLCanvasElement>(null);
   const [point, setPoint] = useState<{
@@ -84,19 +111,58 @@ export function Inspector({ ids }: { ids: string[] }) {
     setCropping(false);
     setCodeOpen(false);
     setPoint(null);
-    setImageError(false);
-    pixelCanvas.current = null;
+
     if (ui.selectedId && user)
       void post(`/figures/${ui.selectedId}/view`).catch(() => {});
   }, [ui.selectedId, ui.selectedContext, user?.id]);
+  const selectInInspector = useCallback(
+    (id: string) => {
+      if (id === ui.selectedId) return;
+      const next = [...matched, ...(allQuery.data?.items || [])].find(
+        (item) => item.id === id,
+      );
+      if (next) cache.setQueryData(["figure", id], next);
+      const context = ui.selectedContext;
+      ui.select(
+        id,
+        context
+          ? {
+              feedQuery: context.feedQuery,
+              feedLabel: context.feedLabel,
+              boardId: context.boardId,
+            }
+          : undefined,
+      );
+    },
+    [matched, allQuery.data, cache, ui.selectedId, ui.selectedContext],
+  );
+  const navigationIds = showAll ? siblings.map((item) => item.id) : ids;
   const navigate = useCallback(
     (direction: number) => {
-      const index = ids.indexOf(ui.selectedId || "");
-      const next = ids[index + direction];
-      if (next) ui.select(next);
+      const list = navigationIds.includes(ui.selectedId || "")
+        ? navigationIds
+        : siblings.map((item) => item.id);
+      const index = list.indexOf(ui.selectedId || "");
+      const next = list[index + direction];
+      if (next) selectInInspector(next);
     },
-    [ids, ui.selectedId],
+    [navigationIds, siblings, ui.selectedId, selectInInspector],
   );
+  useEffect(() => {
+    const index = siblings.findIndex((item) => item.id === f?.id);
+    const next = siblings[index + 1] || siblings[index - 1];
+    if (!next || !ui.selectedId) return;
+    const abort = new AbortController();
+    fetch(next.hd_url, { signal: abort.signal, cache: "force-cache" })
+      .then((response) => (response.ok ? response.arrayBuffer() : undefined))
+      .catch(() => {});
+    return () => abort.abort();
+  }, [f?.id, siblings, ui.selectedId]);
+  function toggleScope() {
+    if (showAll && f && !matchedIds.has(f.id) && matched[0])
+      selectInInspector(matched[0].id);
+    setShowAll((value) => !value);
+  }
   useEffect(() => {
     if (!ui.selectedId) return;
     const key = (e: KeyboardEvent) => {
@@ -110,7 +176,7 @@ export function Inspector({ ids }: { ids: string[] }) {
         e.preventDefault();
         const index = siblings.findIndex((s) => s.id === ui.selectedId);
         const next = siblings[index + (e.key === "ArrowUp" ? -1 : 1)];
-        if (next) ui.select(next.id);
+        if (next) selectInInspector(next.id);
       }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
@@ -124,8 +190,8 @@ export function Inspector({ ids }: { ids: string[] }) {
         e.preventDefault();
         setZoom((z) => (z === 1 ? 1.8 : 1));
       }
-      if (e.key.toLowerCase() === "i") setPicker((v) => !v);
-      if (e.key.toLowerCase() === "s" && f) {
+      if (e.key.toLowerCase() === "i" && picture.ready) setPicker((v) => !v);
+      if (e.key.toLowerCase() === "s" && f && !isSwitching) {
         e.preventDefault();
         if (user) void quickSave(f);
         else ui.openLogin();
@@ -138,18 +204,19 @@ export function Inspector({ ids }: { ids: string[] }) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [ui.selectedId, f, navigate, user, siblings, cropping]);
-  function imageLoaded() {
-    const image = img.current;
-    if (!image) return;
-    const c = document.createElement("canvas");
-    c.width = image.naturalWidth;
-    c.height = image.naturalHeight;
-    c.getContext("2d", { willReadFrequently: true })?.drawImage(image, 0, 0);
-    pixelCanvas.current = c;
-  }
+  }, [
+    ui.selectedId,
+    f,
+    navigate,
+    user,
+    siblings,
+    cropping,
+    selectInInspector,
+    picture.ready,
+    isSwitching,
+  ]);
   function move(e: React.PointerEvent<HTMLDivElement>) {
-    if (!img.current || !f) return;
+    if (!img.current || !f || !picture.ready) return;
     const bounds = img.current.getBoundingClientRect();
     const nx = (e.clientX - bounds.left) / bounds.width;
     const ny = (e.clientY - bounds.top) / bounds.height;
@@ -168,13 +235,24 @@ export function Inspector({ ids }: { ids: string[] }) {
         )?.id || null,
       );
     }
-    if (picker && pixelCanvas.current) {
+    if (picker) {
+      if (!pixelCanvas.current) {
+        pixelCanvas.current = document.createElement("canvas");
+        pixelCanvas.current.width = 1;
+        pixelCanvas.current.height = 1;
+      }
       const c = pixelCanvas.current;
-      const px = Math.min(c.width - 1, Math.floor(nx * c.width));
-      const py = Math.min(c.height - 1, Math.floor(ny * c.height));
-      const data = c
-        .getContext("2d", { willReadFrequently: true })!
-        .getImageData(px, py, 1, 1).data;
+      const px = Math.min(
+        img.current.naturalWidth - 1,
+        Math.floor(nx * img.current.naturalWidth),
+      );
+      const py = Math.min(
+        img.current.naturalHeight - 1,
+        Math.floor(ny * img.current.naturalHeight),
+      );
+      const ctx = c.getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(img.current, px, py, 1, 1, 0, 0, 1, 1);
+      const data = ctx.getImageData(0, 0, 1, 1).data;
       const hex =
         "#" +
         [...data]
@@ -193,12 +271,12 @@ export function Inspector({ ids }: { ids: string[] }) {
     }
   }
   useEffect(() => {
-    if (!point || !loupe.current || !pixelCanvas.current) return;
+    if (!point || !loupe.current || !img.current || !picture.ready) return;
     const ctx = loupe.current.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, 112, 112);
     ctx.drawImage(
-      pixelCanvas.current,
+      img.current,
       point.px - 7,
       point.py - 7,
       14,
@@ -221,7 +299,7 @@ export function Inspector({ ids }: { ids: string[] }) {
     ctx.strokeStyle = "#111";
     ctx.lineWidth = 1;
     ctx.strokeRect(56, 56, 8, 8);
-  }, [point]);
+  }, [point, picture.ready]);
   async function save() {
     if (!user) {
       ui.openLogin();
@@ -287,7 +365,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                   <button
                     onClick={() => navigate(-1)}
                     aria-label="上一张图表"
-                    disabled={ids.indexOf(f.id) <= 0}
+                    disabled={navigationIds.indexOf(f.id) <= 0}
                   >
                     <ArrowLeft size={16} />
                   </button>
@@ -295,7 +373,9 @@ export function Inspector({ ids }: { ids: string[] }) {
                   <button
                     onClick={() => navigate(1)}
                     aria-label="下一张图表"
-                    disabled={ids.indexOf(f.id) >= ids.length - 1}
+                    disabled={
+                      navigationIds.indexOf(f.id) >= navigationIds.length - 1
+                    }
                   >
                     <ArrowRight size={16} />
                   </button>
@@ -309,6 +389,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                     }}
                     title="吸管取色 (I)"
                     aria-label="吸管取色"
+                    disabled={!picture.ready}
                   >
                     <Pipette size={16} />
                   </button>
@@ -338,6 +419,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                     setCropping(false);
                     cache.invalidateQueries({ queryKey: ["figure", f.id] });
                     cache.invalidateQueries({ queryKey: ["figures"] });
+                    cache.invalidateQueries({ queryKey: ["siblings"] });
                   }}
                   onCancel={() => setCropping(false)}
                 />
@@ -349,7 +431,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                       onPointerMove={move}
                       onPointerLeave={() => setPoint(null)}
                       onClick={() => {
-                        if (picker && point)
+                        if (picker && point && picture.ready)
                           void copyColor(point.hex, f.id, user);
                       }}
                       style={{
@@ -361,13 +443,15 @@ export function Inspector({ ids }: { ids: string[] }) {
                         <img
                           ref={img}
                           className="fig-paper-blend"
-                          src={f.hd_url}
-                          alt={f.caption || f.title}
-                          onLoad={imageLoaded}
-                          onError={() => setImageError(true)}
+                          src={picture.visible?.src || f.thumb_url}
+                          alt={picture.visible?.alt || f.title}
+                          data-figure-id={picture.visible?.id || f.id}
+                          data-resolution={picture.ready ? "hd" : "preview"}
+                          onLoad={picture.onLoad}
+                          onError={picture.onError}
                           draggable={false}
                         />
-                        {focused && (
+                        {focused && picture.visible?.id === f.id && (
                           <div
                             className="spotlight"
                             style={{
@@ -379,12 +463,19 @@ export function Inspector({ ids }: { ids: string[] }) {
                           />
                         )}
                       </div>
-                      {imageError && (
-                        <p className="error-box">
-                          高清图暂时无法加载，请稍后重试。
-                        </p>
+                      {(!picture.ready || isSwitching) && (
+                        <div className="image-load-status" role="status">
+                          {picture.error
+                            ? "高清图暂不可用，保留预览"
+                            : isSwitching
+                              ? "正在读取图表…"
+                              : `正在加载 ${f.fig_label} 高清图…`}
+                          {picture.error && (
+                            <button onClick={picture.retry}>重试</button>
+                          )}
+                        </div>
                       )}
-                      {point && picker && (
+                      {point && picker && picture.ready && (
                         <div
                           className="loupe"
                           style={{
@@ -430,7 +521,15 @@ export function Inspector({ ids }: { ids: string[] }) {
                   <SiblingFigures
                     figures={siblings}
                     currentId={f.id}
-                    onSelect={ui.select}
+                    onSelect={selectInInspector}
+                    scopeLabel={feedQuery ? feedLabel : undefined}
+                    showAll={showAll}
+                    totalCount={siblingQuery.data?.total}
+                    matchedIds={feedQuery ? matchedIds : undefined}
+                    onToggleScope={toggleScope}
+                    loading={
+                      siblingQuery.isPending || (showAll && allQuery.isPending)
+                    }
                   />
                   <div className="canvas-bottom">
                     <span>
@@ -457,7 +556,11 @@ export function Inspector({ ids }: { ids: string[] }) {
                 </>
               )}
             </section>
-            <aside className="inspector-sidebar">
+            <aside
+              className="inspector-sidebar"
+              aria-busy={isSwitching}
+              inert={isSwitching}
+            >
               <div className="paper-heading">
                 <div className="eyebrow">
                   THE PAPER{" "}
@@ -466,6 +569,20 @@ export function Inspector({ ids }: { ids: string[] }) {
                   </span>
                   {f.venue_tier && f.venue_tier !== "poster" && (
                     <span className="honor-badge">{f.venue_tier}</span>
+                  )}
+                </div>
+                <div className="inspector-classification">
+                  <strong>{archetypeNames[f.archetype] || f.archetype}</strong>
+                  {feedQuery && siblingQuery.data && (
+                    <span
+                      className={
+                        matchedIds.has(f.id) ? "matched" : "outside-filter"
+                      }
+                    >
+                      {matchedIds.has(f.id)
+                        ? `命中${feedLabel}`
+                        : "未命中当前筛选"}
+                    </span>
                   )}
                 </div>
                 <h2>{f.title}</h2>
@@ -733,6 +850,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                             queryKey: ["figure", f.id],
                           });
                           cache.invalidateQueries({ queryKey: ["figures"] });
+                          cache.invalidateQueries({ queryKey: ["siblings"] });
                         } catch (e) {
                           ui.notify((e as Error).message);
                         }
