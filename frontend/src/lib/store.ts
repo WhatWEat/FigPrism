@@ -11,6 +11,10 @@ type State = {
   selectedContext: SelectionContext | null;
   toast: string;
   density: number;
+  viewMode: "deck" | "swimlane" | "flat";
+  paperBlend: boolean;
+  setViewMode: (mode: "deck" | "swimlane" | "flat") => void;
+  setPaperBlend: (enabled: boolean) => void;
   openLogin: () => void;
   openIngest: () => void;
   select: (id: string | null, context?: SelectionContext) => void;
@@ -25,6 +29,20 @@ export const useUI = create<State>((set) => ({
   selectedContext: null,
   toast: "",
   density: 4,
+  viewMode: "deck",
+  paperBlend: true,
+  setViewMode: (viewMode) => {
+    set({ viewMode });
+    try {
+      localStorage.setItem("figprism-view-mode", viewMode);
+    } catch {}
+  },
+  setPaperBlend: (paperBlend) => {
+    set({ paperBlend });
+    try {
+      localStorage.setItem("figprism-paper-blend", String(paperBlend));
+    } catch {}
+  },
   openLogin: () => set({ loginOpen: true }),
   openIngest: () => set({ ingestOpen: true }),
   select: (id, context) =>

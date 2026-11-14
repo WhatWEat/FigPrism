@@ -6,12 +6,25 @@ import { Figure, Board } from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { api, post, put } from "@/lib/api";
 import { Swatches, useUser } from "./ui";
+const readyThumbnails = new Set<string>();
+export function preloadThumbnails(figures: Figure[]) {
+  for (const figure of figures) {
+    if (readyThumbnails.has(figure.thumb_url)) continue;
+    const image = new Image();
+    image.src = figure.thumb_url;
+    image
+      .decode()
+      .then(() => readyThumbnails.add(figure.thumb_url))
+      .catch(() => {});
+  }
+}
 export function BlurImage({ figure: f }: { figure: Figure }) {
+  const blend = useUI((s) => s.paperBlend);
   const focused = f.subitems.find(
     (s) => s.id === f.collection_item?.focused_subitem_id,
   );
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => readyThumbnails.has(f.thumb_url));
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!f.blurhash || !canvas.current) return;
@@ -36,12 +49,17 @@ export function BlurImage({ figure: f }: { figure: Figure }) {
         aria-hidden="true"
       />
       <img
+        className={blend ? "fig-paper-blend" : ""}
+        draggable={false}
         src={f.thumb_url}
         width={f.width}
         height={f.height}
         alt={`${f.fig_label}: ${f.caption || f.title}`}
         loading="lazy"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          readyThumbnails.add(f.thumb_url);
+          setLoaded(true);
+        }}
         onError={() => setFailed(true)}
         style={{ opacity: loaded ? 1 : 0 }}
       />

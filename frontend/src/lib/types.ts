@@ -112,3 +112,30 @@ export const archetypeNames: Record<string, string> = {
   Heatmap: "热力分布",
   "Case Study": "定性案例",
 };
+
+export type PaperGroup = {
+  paper: Pick<
+    Figure,
+    | "title"
+    | "authors"
+    | "abstract"
+    | "venue"
+    | "venue_year"
+    | "venue_tier"
+    | "hf_upvotes"
+    | "layout_type"
+    | "source_urls"
+    | "domains"
+    | "arxiv_id"
+  > & { id: string };
+  hero_figure_id: string;
+  matched_figures: Figure[];
+};
+export type FeedPage = {
+  group_by: "paper" | "none";
+  items: PaperGroup[] | Figure[];
+  total: number;
+  total_papers: number;
+  total_figures: number;
+  next_offset: number | null;
+};

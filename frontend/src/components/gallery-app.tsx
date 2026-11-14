@@ -17,6 +17,9 @@ import {
   ChevronDown,
   ChevronUp,
   Columns3,
+  Layers,
+  GalleryHorizontal,
+  Sun,
   Command,
   Filter,
   History,
@@ -35,6 +38,9 @@ import {
   Board,
   Domain,
   FigurePage,
+  FeedPage,
+  PaperGroup,
+  Figure,
   Job,
   archetypes,
   archetypeNames,
@@ -42,6 +48,7 @@ import {
 import { useUI } from "@/lib/store";
 import { Logo, Empty, ErrorMessage, Spinner, useUser } from "./ui";
 import { FigureCard } from "./figure-card";
+import { PaperDeckCard, PaperSwimlane, PaperDeckFeed } from "./paper-groups";
 import { AuthModal, IngestModal } from "./auth-ingest";
 import { Inspector } from "./inspector";
 import { Boards, HistoryPage, AdminPage } from "./workspace";
@@ -85,6 +92,7 @@ function Shell({ page }: { page: Page }) {
     const updated = () => {
       cache.invalidateQueries({ queryKey: ["figure"] });
       cache.invalidateQueries({ queryKey: ["figures"] });
+      cache.invalidateQueries({ queryKey: ["siblings"] });
     };
     stream.addEventListener("figure.created", created);
     stream.addEventListener("figure.updated", updated);
@@ -92,9 +100,18 @@ function Shell({ page }: { page: Page }) {
     return () => stream.close();
   }, [cache]);
   useEffect(() => {
-    const density = Number(localStorage.getItem("figprism-density"));
-    if ([3, 4, 5].includes(density)) ui.setDensity(density);
+    try {
+      const mode = localStorage.getItem("figprism-view-mode");
+      if (mode === "deck" || mode === "swimlane" || mode === "flat")
+        ui.setViewMode(mode);
+      ui.setPaperBlend(
+        localStorage.getItem("figprism-paper-blend") !== "false",
+      );
+    } catch {}
   }, []);
+  useEffect(() => {
+    document.documentElement.dataset.paperBlend = ui.paperBlend ? "on" : "off";
+  }, [ui.paperBlend]);
   const changeIds = useCallback((value: string[]) => setIds(value), []);
   return (
     <>
@@ -143,6 +160,16 @@ function Shell({ page }: { page: Page }) {
             足迹
           </Link>
         </nav>
+        <button
+          className={`paper-blend-toggle ${ui.paperBlend ? "active" : ""}`}
+          aria-label="护眼纸感融合"
+          aria-pressed={ui.paperBlend}
+          title="仅调整显示，吸管和下载保持原始色值"
+          onClick={() => ui.setPaperBlend(!ui.paperBlend)}
+        >
+          <Sun size={15} />
+          <span>护眼纸感</span>
+        </button>
         <div className="account-actions">
           {user ? (
             <>
@@ -168,24 +195,6 @@ function Shell({ page }: { page: Page }) {
                     />
                     <div className="dropdown">
                       <strong>{user.username}</strong>
-                      <span className="subtle-label">浏览密度</span>
-                      <div className="density-controls">
-                        {[3, 4, 5].map((n) => (
-                          <button
-                            key={n}
-                            className={ui.density === n ? "active" : ""}
-                            onClick={() => {
-                              ui.setDensity(n);
-                              localStorage.setItem(
-                                "figprism-density",
-                                String(n),
-                              );
-                            }}
-                          >
-                            {n} 列
-                          </button>
-                        ))}
-                      </div>
                       {user.role === "admin" && (
                         <Link href="/admin">
                           <Settings2 size={14} />
@@ -345,6 +354,8 @@ function Gallery({
       }>("/stats"),
   });
   const parameters = new URLSearchParams({
+    group_by: ui.viewMode === "flat" ? "none" : "paper",
+    limit: ui.viewMode === "flat" ? "24" : "16",
     q: debounced,
     view,
     sort,
@@ -359,10 +370,23 @@ function Gallery({
     queryKey: ["figures", parameters],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      api<FigurePage>(`/figures?${parameters}&offset=${pageParam}`),
+      api<FeedPage>(`/figures/feed?${parameters}&offset=${pageParam}`),
     getNextPageParam: (last) => last.next_offset ?? undefined,
   });
-  const items = result.data?.pages.flatMap((p) => p.items) || [];
+  const loaded =
+    result.data?.pages.flatMap((p) => p.items as (Figure | PaperGroup)[]) || [];
+  const groups =
+    ui.viewMode === "flat"
+      ? []
+      : [
+          ...new Map(
+            (loaded as PaperGroup[]).map((g) => [g.paper.id, g]),
+          ).values(),
+        ];
+  const items =
+    ui.viewMode === "flat"
+      ? [...new Map((loaded as Figure[]).map((f) => [f.id, f])).values()]
+      : groups.flatMap((g) => g.matched_figures);
   const signature = items.map((f) => f.id).join(",");
   useEffect(
     () => onIds(signature ? signature.split(",") : []),
@@ -614,7 +638,7 @@ function Gallery({
             }}
           >
             <LayoutGrid size={14} />
-            全部精选<span>{result.data?.pages[0]?.total ?? "—"}</span>
+            全部精选<span>{result.data?.pages[0]?.total_figures ?? "—"}</span>
           </button>
           <button
             className={view === "method" ? "active" : ""}
@@ -654,6 +678,35 @@ function Gallery({
             <option value="newest">最新收录</option>
             <option value="popular">讨论热度</option>
           </select>
+        </div>
+      </div>
+      <div className="feed-view-bar">
+        <span>
+          {result.data?.pages[0]?.total_papers ?? "—"} 篇论文 ·{" "}
+          {result.data?.pages[0]?.total_figures ?? "—"} 张命中图表
+        </span>
+        <div
+          className="feed-view-switch"
+          role="group"
+          aria-label="图表展示方式"
+        >
+          {(
+            [
+              { id: "deck", label: "图组胶片流", icon: Layers },
+              { id: "swimlane", label: "横排画册流", icon: GalleryHorizontal },
+              { id: "flat", label: "单图平铺流", icon: LayoutGrid },
+            ] as const
+          ).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              aria-pressed={ui.viewMode === id}
+              className={ui.viewMode === id ? "active" : ""}
+              onClick={() => ui.setViewMode(id)}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="archetype-row">
@@ -715,11 +768,25 @@ function Gallery({
           ))}
         </div>
       ) : items.length ? (
-        <div className={`masonry density-${ui.density}`}>
-          {items.map((f) => (
-            <FigureCard key={f.id} figure={f} />
-          ))}
-        </div>
+        ui.viewMode === "deck" ? (
+          <PaperDeckFeed groups={groups} />
+        ) : ui.viewMode === "swimlane" ? (
+          <div className="paper-swimlanes">
+            {groups.map((group) => (
+              <PaperSwimlane
+                key={group.paper.id}
+                group={group}
+                domains={domains.data || []}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="masonry flat-feed">
+            {items.map((f) => (
+              <FigureCard key={f.id} figure={f} />
+            ))}
+          </div>
+        )
       ) : (
         !result.error && (
           <Empty

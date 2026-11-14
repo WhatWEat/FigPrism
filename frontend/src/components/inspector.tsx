@@ -30,6 +30,7 @@ import { Figure, Board, archetypes, archetypeNames } from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { Modal, Spinner, ErrorMessage, useUser, copyColor } from "./ui";
 import { quickSave } from "./figure-card";
+import { SiblingFigures } from "./paper-groups";
 
 export function Inspector({ ids }: { ids: string[] }) {
   const ui = useUI();
@@ -41,6 +42,12 @@ export function Inspector({ ids }: { ids: string[] }) {
     enabled: !!ui.selectedId,
   });
   const f = result.data;
+  const siblingQuery = useQuery({
+    queryKey: ["siblings", f?.paper_id],
+    queryFn: () => api<{ items: Figure[] }>(`/papers/${f?.paper_id}/figures`),
+    enabled: !!f?.paper_id,
+  });
+  const siblings = siblingQuery.data?.items || [];
   const [focus, setFocus] = useState<string | null>(null);
   const [hover, setHover] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -101,6 +108,12 @@ export function Inspector({ ids }: { ids: string[] }) {
         )
       )
         return;
+      if (!cropping && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        const index = siblings.findIndex((s) => s.id === ui.selectedId);
+        const next = siblings[index + (e.key === "ArrowUp" ? -1 : 1)];
+        if (next) ui.select(next.id);
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         navigate(-1);
@@ -127,7 +140,7 @@ export function Inspector({ ids }: { ids: string[] }) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [ui.selectedId, f, navigate, user]);
+  }, [ui.selectedId, f, navigate, user, siblings, cropping]);
   function imageLoaded() {
     const image = img.current;
     if (!image) return;
@@ -319,6 +332,14 @@ export function Inspector({ ids }: { ids: string[] }) {
                     <Focus size={16} />
                   </button>
                   <i />
+                  <button
+                    aria-label="切换护眼纸感"
+                    aria-pressed={ui.paperBlend}
+                    onClick={() => ui.setPaperBlend(!ui.paperBlend)}
+                    title="护眼融合不改变吸管原始像素"
+                  >
+                    <span>纸感</span>
+                  </button>
                   <button onClick={() => setWhite(!white)} title="切换背景">
                     <Grid2X2 size={16} />
                   </button>
@@ -353,6 +374,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                       <div className="image-wrap">
                         <img
                           ref={img}
+                          className={ui.paperBlend ? "fig-paper-blend" : ""}
                           src={f.hd_url}
                           alt={f.caption || f.title}
                           onLoad={imageLoaded}
@@ -419,6 +441,11 @@ export function Inspector({ ids }: { ids: string[] }) {
                       </div>
                     </div>
                   )}
+                  <SiblingFigures
+                    figures={siblings}
+                    currentId={f.id}
+                    onSelect={ui.select}
+                  />
                   <div className="canvas-bottom">
                     <span>
                       <span className="keycap">I</span> 取色{" "}
@@ -939,6 +966,7 @@ function CropEditor({
             >
               <img
                 ref={image}
+                className={ui.paperBlend ? "fig-paper-blend" : ""}
                 src={src}
                 alt="PDF 原页，拖动框选图表"
                 draggable={false}

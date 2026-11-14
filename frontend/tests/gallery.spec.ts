@@ -118,6 +118,7 @@ test("real figure inspector, color export, keyboard navigation and vector downlo
   const data = await res.json();
   test.skip(!data.items?.length, "Real paper import still running");
   await page.goto("/");
+  await page.getByRole("button", { name: "单图平铺流", exact: true }).click();
   await page.locator(".figure-open").first().click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -168,6 +169,7 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
   );
   test.skip(!figure, "Composite import still running");
   await page.goto("/");
+  await page.getByRole("button", { name: "单图平铺流", exact: true }).click();
   await page
     .getByRole("button", {
       name: `查看 ${figure.fig_label} ${figure.title}`,
@@ -229,7 +231,8 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
   expect(board).toBeTruthy();
   await page.keyboard.press("Escape");
   await page.getByRole("link", { name: "看板", exact: true }).click();
-  await page.locator(".figure-open").first().click();
+  await expect(page).toHaveURL(/\/collections$/);
+  await page.locator(".board-content .figure-open").first().click();
   await expect(page.getByText("SUBFIGURE B", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "灵感笔记" })).toHaveValue(
     "E2E: preserve this panel and note",
