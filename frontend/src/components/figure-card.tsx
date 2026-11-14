@@ -19,7 +19,6 @@ export function preloadThumbnails(figures: Figure[]) {
   }
 }
 export function BlurImage({ figure: f }: { figure: Figure }) {
-  const blend = useUI((s) => s.paperBlend);
   const focused = f.subitems.find(
     (s) => s.id === f.collection_item?.focused_subitem_id,
   );
@@ -49,7 +48,7 @@ export function BlurImage({ figure: f }: { figure: Figure }) {
         aria-hidden="true"
       />
       <img
-        className={blend ? "fig-paper-blend" : ""}
+        className="fig-paper-blend"
         draggable={false}
         src={f.thumb_url}
         width={f.width}

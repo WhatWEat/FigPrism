@@ -257,7 +257,7 @@ export function PaperDeckCard({ group }: { group: PaperGroup }) {
                     data-figure-id={f.id}
                   >
                     <img
-                      className={ui.paperBlend ? "fig-paper-blend" : ""}
+                      className="fig-paper-blend"
                       src={f.thumb_url}
                       alt={f.fig_label}
                       loading="lazy"
@@ -415,7 +415,6 @@ export function SiblingFigures({
   currentId: string;
   onSelect: (id: string) => void;
 }) {
-  const blend = useUI((s) => s.paperBlend);
   const track = useHorizontalTrack(figures.length);
   useEffect(() => {
     const active = track.ref.current?.querySelector<HTMLElement>(
@@ -468,7 +467,7 @@ export function SiblingFigures({
               onClick={() => onSelect(f.id)}
             >
               <img
-                className={blend ? "fig-paper-blend" : ""}
+                className="fig-paper-blend"
                 src={f.thumb_url}
                 alt=""
                 loading="lazy"

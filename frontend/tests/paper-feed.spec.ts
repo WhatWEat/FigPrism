@@ -1,12 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-const credentials = JSON.parse(
-  readFileSync(
-    path.resolve(__dirname, "../../data/qa/e2e-account.json"),
-    "utf8",
-  ),
-);
+function getCredentials() {
+  return JSON.parse(
+    readFileSync(
+      path.resolve(__dirname, "../../data/qa/e2e-account.json"),
+      "utf8",
+    ),
+  );
+}
 
 test("default paper deck scrubs colors, expands inline and navigates siblings", async ({
   page,
@@ -126,13 +128,16 @@ test("three feed modes persist and filtering only returns matched figures", asyn
   });
 });
 
-test("warm tokens and paper blend preserve original eyedropper pixels", async ({
+test("fixed warm paper ignores old preferences and preserves original eyedropper pixels", async ({
   page,
 }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("figprism-paper-blend", "false"),
+  );
   await page.goto("/");
   await expect(
     page.getByRole("button", { name: "护眼纸感融合", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
+  ).toHaveCount(0);
   expect(
     await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
   ).toBe("rgb(237, 234, 228)");
@@ -194,20 +199,29 @@ test("warm tokens and paper blend preserve original eyedropper pixels", async ({
     );
   });
   await expect(page.locator(".loupe span")).toHaveText(expected);
-  await page.getByRole("button", { name: "切换护眼纸感", exact: true }).click();
-  await expect(image).not.toHaveClass(/fig-paper-blend/);
-  await page.mouse.move(position.x, position.y);
-  await expect(page.locator(".loupe span")).toHaveText(expected);
+  await expect(
+    page.getByRole("button", { name: "切换护眼纸感", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByTitle("切换背景", { exact: true })).toHaveCount(0);
+  expect(
+    await page
+      .locator(".image-wrap")
+      .evaluate((el) => getComputedStyle(el).backgroundColor),
+  ).toBe("rgb(250, 248, 245)");
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(
     page.getByRole("button", { name: "护眼纸感融合", exact: true }),
-  ).toHaveAttribute("aria-pressed", "false");
+  ).toHaveCount(0);
+  await expect(page.locator(".deck-hero img").first()).toHaveClass(
+    /fig-paper-blend/,
+  );
 });
 
 test("swimlane saves the whole matched paper atomically to a private board", async ({
   page,
 }) => {
+  const credentials = getCredentials();
   expect(
     (
       await page.request.post("/api/auth/login", {

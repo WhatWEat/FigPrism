@@ -19,7 +19,6 @@ import {
   Columns3,
   Layers,
   GalleryHorizontal,
-  Sun,
   Command,
   Filter,
   History,
@@ -104,14 +103,8 @@ function Shell({ page }: { page: Page }) {
       const mode = localStorage.getItem("figprism-view-mode");
       if (mode === "deck" || mode === "swimlane" || mode === "flat")
         ui.setViewMode(mode);
-      ui.setPaperBlend(
-        localStorage.getItem("figprism-paper-blend") !== "false",
-      );
     } catch {}
   }, []);
-  useEffect(() => {
-    document.documentElement.dataset.paperBlend = ui.paperBlend ? "on" : "off";
-  }, [ui.paperBlend]);
   const changeIds = useCallback((value: string[]) => setIds(value), []);
   return (
     <>
@@ -160,16 +153,6 @@ function Shell({ page }: { page: Page }) {
             足迹
           </Link>
         </nav>
-        <button
-          className={`paper-blend-toggle ${ui.paperBlend ? "active" : ""}`}
-          aria-label="护眼纸感融合"
-          aria-pressed={ui.paperBlend}
-          title="仅调整显示，吸管和下载保持原始色值"
-          onClick={() => ui.setPaperBlend(!ui.paperBlend)}
-        >
-          <Sun size={15} />
-          <span>护眼纸感</span>
-        </button>
         <div className="account-actions">
           {user ? (
             <>

@@ -1411,9 +1411,6 @@ kbd {
   min-width: 0;
   overflow: hidden;
 }
-.inspector-canvas.white {
-  background: #ffffff;
-}
 .canvas-top {
   display: flex;
   align-items: center;
@@ -2948,9 +2945,6 @@ kbd {
 }
 
 /* Warm-paper surfaces and readable ink. Original image bytes are never transformed. */
-html[data-paper-blend="off"] {
-  --bg-figure-mat: #ffffff;
-}
 .fig-paper-blend {
   mix-blend-mode: multiply;
   filter: contrast(1.02);
@@ -3031,22 +3025,6 @@ textarea:focus {
 .form label,
 .caption-text {
   color: var(--text-secondary);
-}
-.paper-blend-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  font-size: 11px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-hairline);
-  color: var(--text-secondary);
-}
-.paper-blend-toggle.active {
-  background: var(--bg-subtle);
-  border-color: var(--border-strong);
-  color: var(--text-primary);
 }
 .feed-view-bar {
   display: flex;
@@ -3430,12 +3408,6 @@ textarea:focus {
   background: linear-gradient(90deg, transparent, var(--bg-surface));
 }
 @media (max-width: 1100px) {
-  .paper-blend-toggle {
-    padding: 6px;
-  }
-  .paper-blend-toggle span {
-    display: none;
-  }
   .deck-brow {
     gap: 4px;
     padding: 0 8px;
@@ -3445,15 +3417,8 @@ textarea:focus {
   }
 }
 @media (max-width: 767px) {
-  .paper-blend-toggle {
-    order: 0;
-    margin-left: auto;
-    min-width: 30px;
-    height: 30px;
-    justify-content: center;
-  }
   .account-actions {
-    margin-left: 0;
+    margin-left: auto;
   }
   .primary-nav {
     order: 2;

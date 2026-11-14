@@ -7,7 +7,7 @@
 ## 已实现
 
 - 默认按论文归集的胶片图组（悬停预览、原地展开）、横排画册与单图平铺三态视图；同文缩略导航和 ↑ / ↓ 切图。
-- 暖纸护眼配色、高对比文字、默认开启的纸感融合；吸管始终读取原始未混合像素。
+- 暖纸护眼配色、高对比文字、固定启用的纸感融合；吸管始终读取原始未混合像素。
 - 访客看图、全文检索（支持 `font:Helvetica`、`ratio:>2.0`）、领域/子标签/会议/版式/形态/色相筛选。
 - 高清图表检视器、BlurHash 缩略图占位、子图聚光灯、像素吸管、HEX/RGB/Matplotlib/LaTeX/CSS 配色导出、矢量 PDF 与 TikZ 下载。
 - 邀请制账号、Argon2 密码、可撤销 Cookie 会话、角色权限、私有看板、笔记、ZIP 导出、浏览和取色历史。
@@ -142,10 +142,10 @@ docker compose exec backend figprism pipeline status
 
 ## 论文图组（PRD v2.1）
 
-首页默认 Deck：每张卡片对应一篇论文，胶片条悬停即可切换主图、图号和配色，点击任意图进入检视器；卡片可原地展开为两列图表。Swimlane 按论文横排展示 210px 高图表，支持横向滚轮/拖拽及整组收藏。Flat 保留单图瀑布流。视图和护眼开关保存到 localStorage。
+首页默认 Deck：每张卡片对应一篇论文，胶片条悬停即可切换主图、图号和配色，点击任意图进入检视器；卡片可原地展开为两列图表。Swimlane 按论文横排展示 210px 高图表，支持横向滚轮/拖拽及整组收藏。Flat 保留单图瀑布流。视图选择保存到 localStorage。
 
 `GET /api/figures/feed?group_by=paper` 先应用所有筛选条件，再在 SQL 层按论文分页（默认 16 组）；返回 `paper`、`hero_figure_id`、自然图号排序的 `matched_figures`。代表图优先级为 Pipeline / Framework、Teaser、Micro-Mechanism、实验图。`group_by=none` 按单图分页，旧 `/api/figures` 保持兼容。`GET /api/papers/{id}/figures` 提供完整同文导航；批量收藏接口检查看板所有者并保留已有笔记。
 
-护眼融合使用显示层 `mix-blend-mode: multiply` 和 `contrast(1.02)`，原始 WebP / PDF 文件、导出色值和离屏取色 canvas 都不变。关闭开关时，图片装裱区恢复纯白校色底；其余界面继续使用暖纸和深色字。
+护眼融合使用显示层 `mix-blend-mode: multiply` 和 `contrast(1.02)`，原始 WebP / PDF 文件、导出色值和离屏取色 canvas 都不变。图片装裱区固定使用暖纸底色，不再提供纸感或纯白背景切换，旧版关闭偏好也不会改变显示。
 
 本次 v2.1 使用并行实例发布，旧 `figprism` 容器继续处理切换前已接受的任务；新流量进入 `figprism-v2`。`figprism-drain-legacy.timer` 每两分钟检查一次，确认没有在途/排队任务和附加计算进程后，才停止记录中的旧容器。它不会删除数据库、资产或容器日志。`data/.pipeline/recovery-exempt.json` 在此期间保护旧任务及批次子任务，避免新实例启动时将它们误标为失败；旧运行环境回收后自动移除。

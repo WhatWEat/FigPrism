@@ -13,7 +13,6 @@ import {
   Crop,
   ExternalLink,
   Focus,
-  Grid2X2,
   Minus,
   MousePointer2,
   Pipette,
@@ -52,7 +51,6 @@ export function Inspector({ ids }: { ids: string[] }) {
   const [hover, setHover] = useState(false);
   const [picker, setPicker] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [white, setWhite] = useState(false);
   const [serif, setSerif] = useState(false);
   const [format, setFormat] = useState("HEX");
   const [board, setBoard] = useState("");
@@ -283,7 +281,7 @@ export function Inspector({ ids }: { ids: string[] }) {
       ) : (
         f && (
           <div className="inspector-body">
-            <section className={`inspector-canvas ${white ? "white" : ""}`}>
+            <section className="inspector-canvas">
               <div className="canvas-top">
                 <div className="capsule">
                   <button
@@ -331,18 +329,6 @@ export function Inspector({ ids }: { ids: string[] }) {
                   <button onClick={() => setZoom(1)} title="适应窗口">
                     <Focus size={16} />
                   </button>
-                  <i />
-                  <button
-                    aria-label="切换护眼纸感"
-                    aria-pressed={ui.paperBlend}
-                    onClick={() => ui.setPaperBlend(!ui.paperBlend)}
-                    title="护眼融合不改变吸管原始像素"
-                  >
-                    <span>纸感</span>
-                  </button>
-                  <button onClick={() => setWhite(!white)} title="切换背景">
-                    <Grid2X2 size={16} />
-                  </button>
                 </div>
               </div>
               {cropping ? (
@@ -374,7 +360,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                       <div className="image-wrap">
                         <img
                           ref={img}
-                          className={ui.paperBlend ? "fig-paper-blend" : ""}
+                          className="fig-paper-blend"
                           src={f.hd_url}
                           alt={f.caption || f.title}
                           onLoad={imageLoaded}
@@ -966,7 +952,7 @@ function CropEditor({
             >
               <img
                 ref={image}
-                className={ui.paperBlend ? "fig-paper-blend" : ""}
+                className="fig-paper-blend"
                 src={src}
                 alt="PDF 原页，拖动框选图表"
                 draggable={false}
