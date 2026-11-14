@@ -1,0 +1,7 @@
+[Unit]
+Description=Check whether the previous FigPrism runtime has drained
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=120
+[Install]
+WantedBy=timers.target

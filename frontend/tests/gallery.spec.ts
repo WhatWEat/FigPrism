@@ -185,7 +185,10 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
       ),
     )
     .toBeTruthy();
-  await dialog.getByRole("button", { name: "(b)", exact: true }).click();
+  await dialog
+    .locator(".sub-controls")
+    .getByRole("button", { name: "(b)", exact: true })
+    .click();
   await expect(dialog.locator(".spotlight")).toBeVisible();
   await expect(dialog.getByText("SUBFIGURE B", { exact: true })).toBeVisible();
   await page.keyboard.press("i");
@@ -220,7 +223,10 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
     dialog.getByRole("button", { name: "确认重切并刷新配色" }),
   ).toBeEnabled();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
-  await dialog.getByRole("button", { name: "(b)", exact: true }).click();
+  await dialog
+    .locator(".sub-controls")
+    .getByRole("button", { name: "(b)", exact: true })
+    .click();
   await dialog
     .getByRole("textbox", { name: "灵感笔记" })
     .fill("E2E: preserve this panel and note");

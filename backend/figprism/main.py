@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 import time
+import json
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from .auth import router as auth_router
@@ -11,7 +12,10 @@ from .domains import all_domains
 
 @asynccontextmanager
 async def lifespan(app):
-    init_db(recover_jobs=True)
+    # Rolling deployments can keep a previous coordinator alive to drain accepted jobs.
+    preservation = get_settings().data_dir / ".pipeline" / "recovery-exempt.json"
+    preserve = json.loads(preservation.read_text()) if preservation.exists() else []
+    init_db(recover_jobs=True, preserve_job_ids=preserve)
     try:
         yield
     finally:

@@ -183,3 +183,21 @@ async def test_cancelled_native_worker_is_reaped_before_releasing_cpu_slot(
     assert children[0].returncode is not None
     assert snapshot()["cpu"]["active"] == 0
     assert not list((get_settings().data_dir / ".pipeline" / "cpu").iterdir())
+
+
+def test_rolling_startup_preserves_legacy_batches_but_recovers_abandoned_jobs(client):
+    from figprism.auth import create_user
+    from figprism.ingest import new_job
+    from figprism.db import connect, init_db
+
+    uid = create_user("rolling", "long-enough-password")
+    parent = new_job(uid, "backfill")
+    child = new_job(uid, "ingest", {"batch_id": parent})
+    abandoned = new_job(uid, "ingest")
+    init_db(recover_jobs=True, preserve_job_ids=[parent])
+    with connect() as db:
+        statuses = {
+            r["id"]: r["status"] for r in db.execute("SELECT id,status FROM jobs")
+        }
+    assert statuses[parent] == "queued" and statuses[child] == "queued"
+    assert statuses[abandoned] == "failed"

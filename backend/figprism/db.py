@@ -60,7 +60,7 @@ def connect():
         db.close()
 
 
-def init_db(recover_jobs=False):
+def init_db(recover_jobs=False, preserve_job_ids=()):
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
@@ -89,9 +89,16 @@ def init_db(recover_jobs=False):
                 )
         # A process restart cannot leave uploads permanently marked as running.
         if recover_jobs:
-            db.execute(
-                "UPDATE jobs SET status='failed', message='服务重启，请重试任务' WHERE status IN ('running','queued') AND user_id IS NOT NULL"
-            )
+            preserved = set(preserve_job_ids)
+            for job in db.execute(
+                "SELECT id,payload FROM jobs WHERE status IN ('running','queued') AND user_id IS NOT NULL"
+            ).fetchall():
+                parent = json.loads(job["payload"]).get("batch_id")
+                if job["id"] not in preserved and parent not in preserved:
+                    db.execute(
+                        "UPDATE jobs SET status='failed',message='服务重启，请重试任务' WHERE id=?",
+                        (job["id"],),
+                    )
 
 
 def event(db, kind, payload):

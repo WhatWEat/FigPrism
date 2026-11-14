@@ -1,4 +1,4 @@
-name: figprism
+name: figprism-v2
 services:
   backend:
     build:
@@ -6,7 +6,7 @@ services:
       dockerfile: deploy/Dockerfile.backend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8100:8100"
+      - "127.0.0.1:8101:8100"
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -32,7 +32,7 @@ services:
       dockerfile: deploy/Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3100:3000"
+      - "127.0.0.1:3111:3000"
     depends_on:
       backend:
         condition: service_healthy

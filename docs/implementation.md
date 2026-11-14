@@ -69,3 +69,18 @@ The running backend has active ingestion/backfill jobs. To avoid restarting it, 
 Verified with TLS validation enabled: homepage and workspace routes, API health and figure listing, HTTP-to-HTTPS redirects, both legacy HTTPS redirects, real QA-account login, Secure/HttpOnly session cookies, logout, and rejection of a foreign Origin. A Chromium browser also rendered the homepage and completed login without page errors. Thumbnail, HD WebP and vector PDF requests returned 200, and SSE delivered an event through Nginx.
 
 `certbot renew --cert-name figprism.ai4any.com --dry-run --non-interactive` passed the HTTP-01 challenge and reported no renewal failures.
+
+
+## Paper grouping and warm-paper UI — PRD v2.1
+
+The grouped feed filters figures before SQL aggregation/pagination. A page contains at most 16 paper groups by default, each with all matched figures, a priority-selected hero, natural figure-number ordering, dimensions/BlurHash/palette data. Flat mode remains available. Sibling navigation fetches all figures for the current paper independently of the feed filter. Bulk collection inserts verify ownership, validate all IDs before writing, deduplicate IDs and retain existing notes/focus.
+
+The default Deck view preloads thumbnails as a paper enters the viewport and switches the hero, figure label and palette on hover/focus. It provides an inline two-column expansion. Swimlane uses equal-height horizontally scrolling/draggable paper rows with atomic whole-group save. Inspector thumbnails and up/down shortcuts navigate siblings. View and paper-blend preferences persist locally.
+
+Warm semantic tokens replace cold canvas/surface values and pale readable text. Paper blending is applied only to displayed images; original asset bytes and offscreen canvas RGB reads remain untouched. Tests compare raw canvas samples with the loupe before and after toggling blend.
+
+Verified in an isolated copy of the index: 30 backend tests, TypeScript, production build and eight Playwright workflows passed, including filter-before-group pagination, hero priority/natural order, inline expansion, hover/color linkage, sibling keys, view persistence, bulk ownership, mobile overflow and raw-color fidelity.
+
+The v2.1 rollout uses a parallel Compose project, `figprism-v2` (loopback API 8101 and web 3111). Nginx still serves the current canonical `figprism.ai4any.com` hostname and retains the established exact Origin mapping. Old containers and accepted background jobs keep running. A startup exemption list protects legacy batch IDs and their children; unrelated abandoned web jobs are still recovered as failed. An identity-checked systemd drain task stops only the recorded old containers after jobs and attached CLI processes are idle, without removing data or logs.
+
+Final production acceptance: all eight Playwright workflows passed on `https://figprism.ai4any.com` after the switch, including color-fidelity assertions with blending on/off. Live grouped feed, canonical-origin login, CSRF rejection, stage monitoring and continued legacy-job progress were verified. Temporary QA accounts were removed and isolated preview processes stopped. The recovered Absolute Zero import completed with 39 figures; figures whose vision checks were unavailable remain flagged for review.

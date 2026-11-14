@@ -1,0 +1,8 @@
+[Unit]
+Description=Retire the previous FigPrism runtime after in-flight jobs finish
+After=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/root/code/FigPrism
+ExecStart=/root/code/FigPrism/.venv/bin/python /root/code/FigPrism/deploy/drain_legacy.py
+TimeoutStartSec=90
