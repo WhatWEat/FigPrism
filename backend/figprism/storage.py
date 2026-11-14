@@ -139,7 +139,7 @@ class Storage:
             if refresh:
                 raise FileNotFoundError
             data = path.read_bytes()
-            path.touch()
+            os.utime(path, None)
             return data
         except FileNotFoundError:
             pass

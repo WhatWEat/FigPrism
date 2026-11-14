@@ -7,7 +7,8 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from defusedxml import ElementTree as ET
-from .network import fetch
+from .network import fetch, fetch_metadata
+from .concurrency import bounded_map, resource_lock
 from .domains import all_domains, match_domains
 from .config import get_settings
 from .db import connect
@@ -103,7 +104,7 @@ async def arxiv_search(domain, days=3, years=None, max_results=80):
         end = datetime.now(timezone.utc).strftime("%Y%m%d2359")
     query = f"({terms}) AND ({cats}) AND submittedDate:[{start} TO {end}]"
     return parse_arxiv(
-        await fetch(
+        await fetch_metadata(
             "https://export.arxiv.org/api/query?"
             + urlencode(
                 {
@@ -120,10 +121,11 @@ async def arxiv_search(domain, days=3, years=None, max_results=80):
 
 async def hf_daily(days=3):
     papers = {}
-    for n in range(min(days, 14)):
+
+    async def day(n):
         date = (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
         data = json.loads(
-            await fetch(
+            await fetch_metadata(
                 "https://huggingface.co/api/daily_papers?"
                 + urlencode({"date": date, "limit": 50}),
                 5 * 1024**2,
@@ -134,13 +136,17 @@ async def hf_daily(days=3):
             aid = p.get("id", "")
             if not re.fullmatch(r"\d{4}\.\d{4,5}", aid):
                 continue
+            previous = papers.get(aid, {})
             papers[aid] = {
                 "arxiv_id": aid,
                 "doc_uid": aid,
                 "title": p.get("title", ""),
                 "abstract": p.get("summary", ""),
                 "authors": [a.get("name", "") for a in p.get("authors", [])],
-                "hf_upvotes": p.get("upvotes", entry.get("upvotes", 0)),
+                "hf_upvotes": max(
+                    previous.get("hf_upvotes", 0),
+                    p.get("upvotes", entry.get("upvotes", 0)),
+                ),
                 "source_type": "hf",
                 "keywords": " ".join(p.get("ai_keywords", [])),
                 "source_urls": {
@@ -149,6 +155,8 @@ async def hf_daily(days=3):
                     "hf": f"https://huggingface.co/papers/{aid}",
                 },
             }
+
+    await bounded_map(day, range(min(days, 14)), get_settings().pipeline.metadata)
     return list(papers.values())
 
 
@@ -159,7 +167,7 @@ def content_value(content, key, default=""):
 
 async def verify_openreview(title):
     data = json.loads(
-        await fetch(
+        await fetch_metadata(
             "https://api2.openreview.net/notes?"
             + urlencode({"content.title": title, "limit": 10}),
             3 * 1024**2,
@@ -187,7 +195,7 @@ async def verify_openreview(title):
 
 async def verify_dblp(title):
     data = json.loads(
-        await fetch(
+        await fetch_metadata(
             "https://dblp.org/search/publ/api?"
             + urlencode({"q": title, "format": "json", "h": 5}),
             3 * 1024**2,
@@ -234,7 +242,7 @@ async def verified(paper):
 async def openalex_growth(title):
     try:
         data = json.loads(
-            await fetch(
+            await fetch_metadata(
                 "https://api.openalex.org/works?"
                 + urlencode({"search": title, "per-page": 3}),
                 2 * 1024**2,
@@ -253,7 +261,7 @@ async def openalex_growth(title):
     return 0
 
 
-async def sync(
+async def _sync(
     source="all",
     days=3,
     backfill=False,
@@ -271,49 +279,76 @@ async def sync(
         raise ValueError("没有匹配的激活领域")
     candidates = []
     errors = []
-    update_job(job_id, 2, "正在召回候选论文")
-    if source in ("all", "hf") and not backfill:
+    limits = get_settings().pipeline
+    update_job(job_id, 2, "正在并行召回候选论文")
+
+    async def discover(d):
         try:
-            candidates.extend(await hf_daily(days))
+            if d is None:
+                return await hf_daily(days)
+            return await arxiv_search(
+                d, days, years if backfill else None, max(50, limit * 3)
+            )
         except Exception:
-            errors.append("HF Daily 暂时不可用")
-    if source in ("all", "arxiv"):
-        for d in configs:
-            try:
-                candidates.extend(
-                    await arxiv_search(
-                        d, days, years if backfill else None, max(50, limit * 3)
-                    )
-                )
-            except Exception:
-                errors.append(d["slug"] + " arXiv 暂时不可用")
-    dedup = {p["doc_uid"]: p for p in candidates}
-    eligible = []
-    for i, p in enumerate(dedup.values()):
+            errors.append(
+                ("HF Daily" if d is None else d["slug"] + " arXiv") + " 暂时不可用"
+            )
+            return []
+
+    requests = ([None] if source in ("all", "hf") and not backfill else []) + (
+        configs if source in ("all", "arxiv") else []
+    )
+    for batch in await bounded_map(discover, requests, limits.metadata):
+        candidates.extend(batch)
+    # Merge HF/arXiv versions under the canonical identifier instead of losing hotness.
+    dedup = {}
+    for paper in candidates:
+        key = re.sub(r"v\d+$", "", paper["arxiv_id"])
+        if key in dedup:
+            previous = dedup[key]
+            paper["hf_upvotes"] = max(
+                paper.get("hf_upvotes", 0), previous.get("hf_upvotes", 0)
+            )
+            paper["source_urls"] = {
+                **previous.get("source_urls", {}),
+                **paper.get("source_urls", {}),
+            }
+            for field in ("venue", "venue_year", "venue_tier"):
+                if field not in paper and field in previous:
+                    paper[field] = previous[field]
+        dedup[key] = paper
+    checked = 0
+
+    async def verify(p):
+        nonlocal checked
         domains = match_domains(
             p["title"] + " " + p.get("abstract", "") + " " + p.get("keywords", ""),
             configs,
         )
         if not domains:
-            continue
+            return None
         with connect() as db:
             if db.execute(
-                "SELECT id FROM papers WHERE doc_uid=?", (p["doc_uid"],)
+                "SELECT id FROM papers WHERE doc_uid=? AND ingest_status='completed'",
+                (p["doc_uid"],),
             ).fetchone():
-                continue
+                return None
+        p = await verified(p)
+        checked += 1
         update_job(
             job_id,
-            5 + int(25 * i / max(1, len(dedup))),
-            f"正在核验顶会录用 · {i + 1}/{len(dedup)}",
+            5 + int(25 * checked / max(1, len(dedup))),
+            f"正在并行核验论文 · {checked}/{len(dedup)}",
         )
-        p = await verified(p)
-        if not p:
-            continue
-        if backfill and p.get("venue_year") not in years:
-            continue
+        if not p or (backfill and p.get("venue_year") not in years):
+            return None
         p["domains"] = domains
         p["citation_growth"] = await openalex_growth(p["title"]) if backfill else 0
-        eligible.append(p)
+        return p
+
+    eligible = [
+        p for p in await bounded_map(verify, dedup.values(), limits.metadata) if p
+    ]
     eligible.sort(
         key=lambda p: (
             {"oral": 3, "spotlight": 2, "poster": 1}.get(p.get("venue_tier"), 0),
@@ -332,19 +367,37 @@ async def sync(
             counts[d] += 1
     completed = 0
     failed = 0
-    for i, p in enumerate(chosen):
-        update_job(
-            job_id,
-            30 + int(65 * i / max(1, len(chosen))),
-            f"正在入库 {i + 1}/{len(chosen)} · {p['title'][:80]}",
+
+    async def ingest(p):
+        nonlocal completed, failed
+        # A child job exposes each paper's stage progress; the batch reports totals.
+        from .ingest import new_job
+        from .retry import error_message
+
+        child = new_job(
+            user_id, "ingest", {"input": p["source_urls"]["pdf"], "batch_id": job_id}
         )
         try:
+            update_job(child, 3, "正在下载论文 PDF")
             data = await fetch(p["source_urls"]["pdf"])
-            await ingest_pdf(data, p, user_id, vision_driver=vision_driver)
+            await ingest_pdf(data, p, user_id, child, vision_driver=vision_driver)
             completed += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
-    status = "failed" if not candidates and errors else "completed"
+            update_job(child, 0, error_message(exc), "failed")
+        done = completed + failed
+        update_job(
+            job_id,
+            30 + int(65 * done / max(1, len(chosen))),
+            f"并行入库 · 完成 {completed} / 失败 {failed} / 共 {len(chosen)} 篇",
+        )
+
+    await bounded_map(ingest, chosen, limits.papers + 1)
+    status = (
+        "failed"
+        if (not candidates and errors) or (failed and not completed)
+        else "completed"
+    )
     update_job(
         job_id,
         100,
@@ -353,3 +406,21 @@ async def sync(
         status,
     )
     return {"completed": completed, "failed": failed, "source_errors": errors}
+
+
+async def sync(**kwargs):
+    async with resource_lock("batch", "discovery"):
+        try:
+            return await _sync(**kwargs)
+        except BaseException as exc:
+            from .retry import error_message
+
+            update_job(
+                kwargs.get("job_id"),
+                0,
+                "任务中断，可恢复已有进度"
+                if isinstance(exc, asyncio.CancelledError)
+                else error_message(exc),
+                "failed",
+            )
+            raise

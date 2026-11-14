@@ -6,7 +6,6 @@ serialize; stage slots never hold a SQLite transaction across network I/O.
 
 import asyncio
 from contextlib import asynccontextmanager
-from functools import partial
 import hashlib
 import json
 import os

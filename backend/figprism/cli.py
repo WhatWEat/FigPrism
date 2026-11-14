@@ -16,10 +16,13 @@ from .ingest import (
 )
 from .network import fetch
 from .sources import sync as do_sync
+from .retry import error_message
 
 app = typer.Typer(help="FigPrism research figure pipeline")
 auth = typer.Typer()
 queue = typer.Typer()
+pipeline = typer.Typer()
+app.add_typer(pipeline, name="pipeline")
 app.add_typer(auth, name="auth")
 app.add_typer(queue, name="queue")
 
@@ -62,9 +65,17 @@ def ingest(
             data = await fetch(url)
         else:
             raise typer.BadParameter("Pass --input or --pdf")
-        typer.echo(await ingest_pdf(data, meta, vision_driver=vision_driver))
+        typer.echo(
+            await ingest_pdf(data, meta, job_id=jid, vision_driver=vision_driver)
+        )
 
-    asyncio.run(run())
+    jid = new_job(None, "ingest", {"input": input or str(pdf)})
+    try:
+        asyncio.run(run())
+    except Exception as exc:
+        update_job(jid, 0, error_message(exc), "failed")
+        typer.echo(error_message(exc), err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -140,6 +151,22 @@ def recrop(figure_id: str, page: int, bbox: str, snap_vector: bool = True):
 @app.command("rebuild-from-webdav")
 def rebuild_from_webdav():
     typer.echo(f"Restored {asyncio.run(rebuild())} figures")
+
+
+@pipeline.command("status")
+def pipeline_status():
+    from .concurrency import snapshot
+
+    typer.echo(
+        json.dumps(
+            {
+                "stages": snapshot(),
+                "configuration": get_settings().pipeline.model_dump(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

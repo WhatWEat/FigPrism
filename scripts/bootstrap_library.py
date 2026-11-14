@@ -6,17 +6,21 @@ from figprism.db import init_db, connect
 from figprism.ingest import resolve, ingest_pdf, new_job, update_job
 from figprism.network import fetch
 from figprism.sources import verified
+from figprism.concurrency import bounded_map
+from figprism.config import get_settings
+from figprism.retry import error_message
 
 
 async def main(papers):
     init_db()
-    for aid in papers:
+
+    async def one(aid):
         with connect() as db:
             if db.execute(
                 "SELECT id FROM papers WHERE arxiv_id=? AND ingest_status='completed'",
                 (aid,),
             ).fetchone():
-                continue
+                return
         jid = new_job(None, "bootstrap", {"input": aid})
         try:
             print("Starting", aid, flush=True)
@@ -28,8 +32,10 @@ async def main(papers):
             pid = await ingest_pdf(data, meta, job_id=jid)
             print("Completed", aid, pid, flush=True)
         except Exception as e:
-            update_job(jid, 0, "Starter paper failed; retry from CLI", "failed")
-            print("Failed", aid, type(e).__name__, flush=True)
+            update_job(jid, 0, error_message(e), "failed")
+            print("Failed", aid, error_message(e), flush=True)
+
+    await bounded_map(one, papers, get_settings().pipeline.papers + 1)
 
 
 if __name__ == "__main__":

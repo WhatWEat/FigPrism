@@ -7,7 +7,6 @@ import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Literal
-import fitz
 from fastapi import (
     APIRouter,
     Depends,
@@ -36,20 +35,39 @@ from .ingest import (
     rebuild,
 )
 from .vision import ARCHETYPES
+from .concurrency import snapshot, resource_lock
+from .processing import cpu_call
+from pathlib import Path
+import tempfile
+from .retry import error_message
 
 router = APIRouter(prefix="/api")
 _tasks = set()
-_ingest_gate = asyncio.Semaphore(1)
 
 
 def launch(coro):
-    async def guarded():
-        async with _ingest_gate:
-            await coro
-
-    task = asyncio.create_task(guarded())
+    task = asyncio.create_task(coro)
     _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+
+    def finished(task):
+        _tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    task.add_done_callback(finished)
+
+
+async def stop_tasks():
+    pending = list(_tasks)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+@router.get("/admin/pipeline")
+def pipeline_status(user=Depends(require_admin)):
+    return {"stages": snapshot(), "configuration": get_settings().pipeline.model_dump()}
 
 
 def deserialize(row):
@@ -277,29 +295,26 @@ async def page_preview(fid: str, page: int | None = None, user=Depends(require_u
     if not r:
         raise HTTPException(404)
     data = await Storage().get(r["webdav_pdf_path"])
-    with fitz.open(stream=data, filetype="pdf") as doc:
+    root = get_settings().data_dir / ".pipeline" / "work"
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root) as work:
+        path = Path(work) / "paper.pdf"
+        path.write_bytes(data)
         n = page or r["page_number"]
-        if n < 1 or n > len(doc):
-            raise HTTPException(400, "页码超出范围")
-        p = doc[n - 1]
-        pix = p.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), colorspace=fitz.csRGB)
-        bbox = json.loads(r["bbox"])
-        norm = [
-            bbox[0] / p.rect.width,
-            bbox[1] / p.rect.height,
-            bbox[2] / p.rect.width,
-            bbox[3] / p.rect.height,
-        ]
-        return Response(
-            pix.tobytes("png"),
-            media_type="image/png",
-            headers={
-                "Cache-Control": "private, no-store",
-                "X-Page-Count": str(len(doc)),
-                "X-Crop-Bbox": json.dumps(norm),
-                "X-Page-Number": str(n),
-            },
-        )
+        try:
+            result = await cpu_call("preview", path, page=n, bbox=json.loads(r["bbox"]))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+    return Response(
+        result["image"],
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Page-Count": str(result["count"]),
+            "X-Crop-Bbox": json.dumps(result["bbox"]),
+            "X-Page-Number": str(n),
+        },
+    )
 
 
 class Recrop(BaseModel):
@@ -311,8 +326,7 @@ class Recrop(BaseModel):
 @router.post("/figures/{fid}/recrop")
 async def recrop_figure(fid: str, body: Recrop, user=Depends(require_user)):
     try:
-        async with _ingest_gate:
-            await recrop(fid, body.page, body.bbox, body.snap_vector)
+        await recrop(fid, body.page, body.bbox, body.snap_vector)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return figure(fid)
@@ -415,7 +429,7 @@ def check_hash(body: dict, user=Depends(require_user)):
 def check_job_limit(uid):
     with connect() as db:
         n = db.execute(
-            "SELECT COUNT(*) FROM jobs WHERE user_id=? AND status IN ('queued','running')",
+            "SELECT COUNT(*) FROM jobs WHERE user_id=? AND status IN ('queued','running') AND json_extract(payload,'$.batch_id') IS NULL",
             (uid,),
         ).fetchone()[0]
     if n >= 3:
@@ -834,8 +848,8 @@ async def admin_sync(body: SyncRequest, user=Depends(require_admin)):
                     job_id=jid,
                     user_id=user["id"],
                 )
-        except Exception:
-            update_job(jid, 0, "同步失败，请检查远端服务连接", "failed")
+        except Exception as exc:
+            update_job(jid, 0, error_message(exc), "failed")
 
     launch(run())
     return {"job_id": jid}

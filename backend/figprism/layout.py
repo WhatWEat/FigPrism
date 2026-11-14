@@ -1,6 +1,7 @@
 """DocLayout-YOLO ONNX inference on CPU, with two threads and bounded page resolution."""
 
 import ast
+from .config import get_settings
 from functools import lru_cache
 import numpy as np
 import onnxruntime as ort
@@ -10,7 +11,7 @@ from PIL import Image
 @lru_cache(maxsize=1)
 def session(path):
     options = ort.SessionOptions()
-    options.intra_op_num_threads = 2
+    options.intra_op_num_threads = get_settings().pipeline.cpu_threads
     options.inter_op_num_threads = 1
     model = ort.InferenceSession(
         path, sess_options=options, providers=["CPUExecutionProvider"]

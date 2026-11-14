@@ -23,6 +23,7 @@ class VisionConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
+    pending_jobs: int = Field(default=12, ge=3, le=64)
     metadata: int = Field(default=4, ge=1, le=16)
     download: int = Field(default=3, ge=1, le=8)
     papers: int = Field(default=2, ge=1, le=4)

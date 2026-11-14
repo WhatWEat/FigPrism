@@ -20,6 +20,7 @@ cache_max_bytes: 2147483648
 # Stage limits are shared across API/CLI/timer processes using the data volume.
 # Restart all coordinators together after changing limits.
 pipeline:
+  pending_jobs: 12
   metadata: 4
   download: 3
   papers: 2

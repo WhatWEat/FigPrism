@@ -3,18 +3,19 @@ import hashlib
 import json
 import re
 import uuid
+from pathlib import Path
+import tempfile
 from urllib.parse import urlparse, parse_qs
-import fitz
 from defusedxml import ElementTree as ET
 from .config import get_settings
 from .db import connect, event
 from .domains import match_domains, all_domains
-from .extraction import pdf_title, layout_type, render, Crop, snap
 from .network import fetch
 from .storage import Storage
-from .tex import unpack, figures, merge_crops
 from .vision import judge
-from .locking import serialized
+from .concurrency import stage, resource_lock, bounded_map
+from .processing import cpu_call
+from .retry import error_message, root_error
 
 ARXIV_RE = r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?"
 PAPER_JSON = ("authors", "source_urls", "domains")
@@ -31,9 +32,28 @@ def update_job(jid, progress, message, status="running"):
         )
 
 
+class JobQueueFull(Exception):
+    pass
+
+
 def new_job(uid, kind, payload=None):
     jid = uuid.uuid4().hex
     with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if uid is not None and not (payload or {}).get("batch_id"):
+            queued = "status IN ('queued','running') AND json_extract(payload,'$.batch_id') IS NULL"
+            if (
+                db.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE user_id=? AND " + queued, (uid,)
+                ).fetchone()[0]
+                >= 3
+            ):
+                raise JobQueueFull("最多同时排队 3 个任务")
+            if (
+                db.execute("SELECT COUNT(*) FROM jobs WHERE " + queued).fetchone()[0]
+                >= get_settings().pipeline.pending_jobs
+            ):
+                raise JobQueueFull("处理队列已满，请稍后再试")
         db.execute(
             "INSERT INTO jobs(id,user_id,kind,payload) VALUES(?,?,?,?)",
             (jid, uid, kind, json.dumps(payload or {})),
@@ -73,7 +93,9 @@ async def resolve(value):
         }
         try:
             data = await fetch(
-                f"https://export.arxiv.org/api/query?id_list={aid}", 2 * 1024**2
+                f"https://export.arxiv.org/api/query?id_list={aid}",
+                2 * 1024**2,
+                budget="metadata",
             )
             root = ET.fromstring(data)
             entry = root.find("{http://www.w3.org/2005/Atom}entry")
@@ -112,28 +134,54 @@ async def resolve(value):
 
 
 async def backup(paper_id, storage=None):
-    storage = storage or Storage()
-    with connect() as db:
-        p = dict(db.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone())
-        fs = [
-            dict(r)
-            for r in db.execute("SELECT * FROM figures WHERE paper_id=?", (paper_id,))
-        ]
-    p.pop("uploaded_by", None)
-    key = p["webdav_pdf_path"].rsplit("/", 1)[0] + "/metadata.json"
-    await storage.put(
-        key,
-        json.dumps(
-            {"schema_version": 1, "paper": p, "figures": fs}, ensure_ascii=False
-        ).encode(),
-        "application/json",
-    )
+    # Snapshot inside the lock, so an older upload cannot replace a newer manifest.
+    async with resource_lock("manifest", paper_id):
+        storage = storage or Storage()
+        with connect() as db:
+            p = dict(
+                db.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone()
+            )
+            fs = [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM figures WHERE paper_id=? ORDER BY id", (paper_id,)
+                )
+            ]
+        p.pop("uploaded_by", None)
+        data = json.dumps(
+            {"schema_version": 1, "paper": p, "figures": fs},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        checkpoint = get_settings().data_dir / ".pipeline" / "manifests" / paper_id
+        if checkpoint.exists() and checkpoint.read_text() == digest:
+            return
+        await storage.put(
+            p["webdav_pdf_path"].rsplit("/", 1)[0] + "/metadata.json",
+            data,
+            "application/json",
+        )
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_text(digest)
 
 
 async def persist_crop(
-    paper_id, base, crop, rendered, verdict, storage, figure_id=None
+    paper_id,
+    base,
+    crop,
+    rendered,
+    verdict,
+    storage,
+    figure_id=None,
+    publication_barrier=None,
 ):
-    fid = figure_id or uuid.uuid4().hex
+    fid = (
+        figure_id
+        or uuid.uuid5(
+            uuid.NAMESPACE_URL, f"figprism:{paper_id}:{crop.page}:{crop.label}"
+        ).hex
+    )
     version = hashlib.sha256(rendered["hd"]).hexdigest()[:16]
     asset = f"{base}/figures/{fid}_{version}"
     subitems = []
@@ -144,20 +192,21 @@ async def persist_crop(
             sub["raw_path"] = asset + "_sub_" + sub["id"] + "_raw.pdf"
             await storage.put(sub["raw_path"], raw, "application/pdf")
         subitems.append(sub)
-    await asyncio.gather(
-        *(
-            storage.put(
-                asset + "_" + suffix + (".pdf" if suffix == "raw" else ".webp"),
-                rendered[suffix],
-                mime,
+    async with asyncio.TaskGroup() as uploads:
+        for suffix, mime in [
+            ("thumb", "image/webp"),
+            ("hd", "image/webp"),
+            ("raw", "application/pdf"),
+        ]:
+            uploads.create_task(
+                storage.put(
+                    asset + "_" + suffix + (".pdf" if suffix == "raw" else ".webp"),
+                    rendered[suffix],
+                    mime,
+                )
             )
-            for suffix, mime in [
-                ("thumb", "image/webp"),
-                ("hd", "image/webp"),
-                ("raw", "application/pdf"),
-            ]
-        )
-    )
+    if publication_barrier is not None:
+        await asyncio.shield(publication_barrier)
     status = (
         "ok"
         if verdict
@@ -235,7 +284,6 @@ async def persist_crop(
     return fid
 
 
-@serialized
 async def ingest_pdf(
     data,
     metadata=None,
@@ -245,203 +293,305 @@ async def ingest_pdf(
     source_data=None,
     collection_id=None,
 ):
-    metadata = metadata or {}
-    storage = Storage()
+    metadata = dict(metadata or {})
     if len(data) > get_settings().max_pdf_bytes:
         raise ValueError("PDF 不能超过 50MB")
     if not data.lstrip().startswith(b"%PDF"):
         raise ValueError("文件不是有效 PDF")
     sha = hashlib.sha256(data).hexdigest()
-    with connect() as db:
-        existing = db.execute(
-            "SELECT id,ingest_status FROM papers WHERE file_sha256=?", (sha,)
-        ).fetchone()
-        if (
-            existing
-            and existing["ingest_status"] == "completed"
-            and db.execute(
-                "SELECT id FROM figures WHERE paper_id=?", (existing["id"],)
-            ).fetchone()
-        ):
-            update_job(job_id, 100, "这篇论文已入库，无需重复上传", "completed")
-            return existing["id"]
-    doc = fitz.open(stream=data, filetype="pdf")
-    try:
-        if doc.is_encrypted or not len(doc):
-            raise ValueError("PDF 已加密或没有页面")
-        if len(doc) > 150:
-            raise ValueError("PDF 最多支持 150 页")
-        metadata.setdefault("title", pdf_title(doc))
-        metadata.setdefault("doc_uid", "local_" + uuid.uuid4().hex)
-        metadata.setdefault("authors", [])
-        metadata.setdefault(
-            "domains",
-            match_domains(
-                metadata["title"]
-                + " "
-                + metadata.get("abstract", "")
-                + " "
-                + doc[0].get_text()
-            ),
-        )
-        aid = metadata.get("arxiv_id")
-        if not aid:
-            m = re.search(r"arXiv:\s*(" + ARXIV_RE + ")", doc[0].get_text())
-            if m:
-                aid = m[1]
-                metadata["arxiv_id"] = aid
-        update_job(job_id, 8, "PDF 已接收，正在解析源码与页面布局")
-        source_figures = []
-        if aid and source_data is None:
+    # Lock duplicate identities before admission; waiting duplicates consume no paper slot.
+    async with (
+        resource_lock("maintenance", "library", shared=True),
+        resource_lock("document", metadata.get("doc_uid", sha)),
+        resource_lock("sha", sha),
+    ):
+        async with stage("papers"), Storage() as storage:
+            with connect() as db:
+                existing = db.execute(
+                    "SELECT * FROM papers WHERE file_sha256=?", (sha,)
+                ).fetchone()
+                if existing and existing["ingest_status"] == "completed":
+                    attach_collection(existing["id"], collection_id, user_id)
+                    update_job(job_id, 100, "这篇论文已入库，无需重复上传", "completed")
+                    return existing["id"]
+            root = get_settings().data_dir / ".pipeline" / "work"
+            root.mkdir(parents=True, exist_ok=True)
+            pid = existing["id"] if existing else uuid.uuid4().hex
             try:
-                source_data = await fetch(
-                    f"https://export.arxiv.org/e-print/{aid}", 50 * 1024**2
-                )
-            except Exception:
-                source_data = None
-        if source_data:
-            try:
-                source_figures = await asyncio.to_thread(
-                    lambda: figures(unpack(source_data))
-                )
-            except Exception:
-                pass
-        crops = await asyncio.to_thread(merge_crops, doc, source_figures)
-        if not crops:
-            raise ValueError(
-                "未识别到带图注的图表，请检查 PDF 是否为扫描件或使用其他论文"
-            )
-        pid = existing["id"] if existing else uuid.uuid4().hex
-        base = f"papers/{metadata.get('venue_year') or 'uploads'}/{pid}"
-        if not existing:
-            update_job(
-                job_id, 9, f"正在上传原文至 WebDAV · {len(data) / 1024**2:.1f} MB"
-            )
-            await storage.put(base + "/paper.pdf", data, "application/pdf")
-        row = {
-            "id": pid,
-            "file_sha256": sha,
-            "doc_uid": metadata["doc_uid"],
-            "title": metadata["title"],
-            "authors": metadata["authors"],
-            "abstract": metadata.get("abstract", ""),
-            "source_type": metadata.get("source_type", "upload"),
-            "arxiv_id": metadata.get("arxiv_id"),
-            "venue": metadata.get("venue", "Preprint"),
-            "venue_year": metadata.get("venue_year"),
-            "venue_tier": metadata.get("venue_tier"),
-            "hf_upvotes": metadata.get("hf_upvotes", 0),
-            "layout_type": layout_type(doc),
-            "source_urls": metadata.get("source_urls", {}),
-            "domains": metadata["domains"],
-            "ingest_status": "processing",
-            "uploaded_by": user_id,
-            "webdav_pdf_path": base + "/paper.pdf",
-        }
-        with connect() as db:
-            if not existing:
-                db.execute(
-                    "INSERT INTO papers("
-                    + ",".join(row)
-                    + ") VALUES("
-                    + ",".join("?" for _ in row)
-                    + ")",
-                    tuple(
-                        json.dumps(v, ensure_ascii=False) if k in PAPER_JSON else v
-                        for k, v in row.items()
-                    ),
-                )
-        judge_unavailable = False
-        count = 0
-        for i, crop in enumerate(crops):
-            if existing:
-                with connect() as db:
-                    done = db.execute(
-                        "SELECT id FROM figures WHERE paper_id=? AND fig_label=? AND page_number=?",
-                        (pid, crop.label, crop.page),
-                    ).fetchone()
-                if done:
-                    count += 1
-                    continue
-            update_job(
-                job_id,
-                10 + int(i / len(crops) * 85),
-                f"正在拆解 {crop.label} · 已切出 {i}/{len(crops)} 张",
-            )
-            rendered = await asyncio.to_thread(render, doc, crop)
-            verdict = None
-            if not judge_unavailable:
-                try:
-                    verdict = await judge(
-                        rendered["thumb"], crop.caption, all_domains(), vision_driver
+                with tempfile.TemporaryDirectory(dir=root) as work:
+                    pdf = Path(work) / "paper.pdf"
+                    pdf.write_bytes(data)
+                    update_job(job_id, 5, "正在读取论文信息")
+                    info = await cpu_call("inspect", pdf)
+                    metadata.setdefault("title", info["title"])
+                    metadata.setdefault("doc_uid", "local_" + sha)
+                    metadata.setdefault("authors", [])
+                    metadata.setdefault(
+                        "domains",
+                        match_domains(
+                            metadata["title"]
+                            + " "
+                            + metadata.get("abstract", "")
+                            + " "
+                            + info["first_page_text"]
+                        ),
                     )
-                except Exception:
-                    judge_unavailable = True
-            fid = await persist_crop(pid, base, crop, rendered, verdict, storage)
-            if collection_id:
-                with connect() as db:
-                    owned = db.execute(
-                        "SELECT id FROM collections WHERE id=? AND user_id=?",
-                        (collection_id, user_id),
-                    ).fetchone()
-                    if owned:
-                        db.execute(
-                            "INSERT OR IGNORE INTO collection_items(id,collection_id,figure_id) VALUES(?,?,?)",
-                            (uuid.uuid4().hex, collection_id, fid),
+                    aid = metadata.get("arxiv_id")
+                    if not aid:
+                        match = re.search(
+                            r"arXiv:\s*(" + ARXIV_RE + ")", info["first_page_text"]
                         )
-            count += 1
-        with connect() as db:
-            db.execute("UPDATE papers SET ingest_status='completed' WHERE id=?", (pid,))
-        await backup(pid, storage)
-        update_job(
-            job_id,
-            100,
-            f"完成 · {count} 张图表"
-            + ("；视觉模型不可用，已加入复核队列" if judge_unavailable else ""),
-            "completed",
-        )
-        return pid
-    finally:
-        doc.close()
+                        if match:
+                            aid = match[1]
+                            metadata["arxiv_id"] = aid
+                    base = (
+                        existing["webdav_pdf_path"].rsplit("/", 1)[0]
+                        if existing
+                        else f"papers/{metadata.get('venue_year') or 'uploads'}/{pid}"
+                    )
+                    row = {
+                        "id": pid,
+                        "file_sha256": sha,
+                        "doc_uid": metadata["doc_uid"],
+                        "title": metadata["title"],
+                        "authors": metadata["authors"],
+                        "abstract": metadata.get("abstract", ""),
+                        "source_type": metadata.get("source_type", "upload"),
+                        "arxiv_id": aid,
+                        "venue": metadata.get("venue", "Preprint"),
+                        "venue_year": metadata.get("venue_year"),
+                        "venue_tier": metadata.get("venue_tier"),
+                        "hf_upvotes": metadata.get("hf_upvotes", 0),
+                        "layout_type": info["layout_type"],
+                        "source_urls": metadata.get("source_urls", {}),
+                        "domains": metadata["domains"],
+                        "ingest_status": "processing",
+                        "pdf_uploaded": 0,
+                        "uploaded_by": user_id,
+                        "webdav_pdf_path": base + "/paper.pdf",
+                    }
+                    with connect() as db:
+                        if existing:
+                            db.execute(
+                                "UPDATE papers SET ingest_status='processing' WHERE id=?",
+                                (pid,),
+                            )
+                        else:
+                            db.execute(
+                                "INSERT INTO papers("
+                                + ",".join(row)
+                                + ") VALUES("
+                                + ",".join("?" for _ in row)
+                                + ")",
+                                tuple(
+                                    json.dumps(v, ensure_ascii=False)
+                                    if k in PAPER_JSON
+                                    else v
+                                    for k, v in row.items()
+                                ),
+                            )
+
+                    async def store_pdf():
+                        if not existing or not existing["pdf_uploaded"]:
+                            await storage.put(
+                                base + "/paper.pdf", data, "application/pdf"
+                            )
+                            with connect() as db:
+                                db.execute(
+                                    "UPDATE papers SET pdf_uploaded=1 WHERE id=?",
+                                    (pid,),
+                                )
+
+                    async def plan():
+                        source = source_data
+                        if aid and source is None:
+                            try:
+                                source = await fetch(
+                                    f"https://export.arxiv.org/e-print/{aid}",
+                                    50 * 1024**2,
+                                )
+                            except Exception:
+                                source = None
+                        source_path = None
+                        if source:
+                            source_path = str(Path(work) / "source")
+                            Path(source_path).write_bytes(source)
+                        return await cpu_call("plan", pdf, source_path=source_path)
+
+                    # PDF transfer and layout work overlap. No figure is published until its
+                    # original PDF and every figure asset are durable on WebDAV.
+                    async with asyncio.TaskGroup() as group:
+                        original = group.create_task(store_pdf())
+                        planned = group.create_task(plan())
+                        crops = await planned
+                        crops = list({(c.label, c.page): c for c in crops}.values())
+                        if not crops:
+                            raise ValueError(
+                                "未识别到带图注的图表，请检查 PDF 是否为扫描件"
+                            )
+                        with connect() as db:
+                            done = {
+                                (r["fig_label"], r["page_number"])
+                                for r in db.execute(
+                                    "SELECT fig_label,page_number FROM figures WHERE paper_id=?",
+                                    (pid,),
+                                )
+                            }
+                        todo = [c for c in crops if (c.label, c.page) not in done]
+                        counts = {
+                            "total": len(crops),
+                            "resumed": len(crops) - len(todo),
+                            "rendered": 0,
+                            "judged": 0,
+                            "published": 0,
+                            "review_fallbacks": 0,
+                        }
+
+                        def progress():
+                            published = counts["resumed"] + counts["published"]
+                            message = f"并行处理 · 渲染 {counts['rendered']}/{len(todo)} · 判图 {counts['judged']}/{len(todo)} · 入库 {published}/{len(crops)}"
+                            update_job(
+                                job_id, 10 + int(85 * published / len(crops)), message
+                            )
+                            if job_id:
+                                with connect() as db:
+                                    db.execute(
+                                        "UPDATE jobs SET payload=json_set(payload,'$.pipeline',json(?)) WHERE id=?",
+                                        (json.dumps(counts), job_id),
+                                    )
+
+                        progress()
+
+                        async def process(crop):
+                            async with stage("figures"):
+                                rendered = await cpu_call("render", pdf, crop=crop)
+                                counts["rendered"] += 1
+                                progress()
+                                verdict = None
+                                try:
+                                    verdict = await judge(
+                                        rendered["thumb"],
+                                        crop.caption,
+                                        all_domains(),
+                                        vision_driver,
+                                    )
+                                except Exception:
+                                    counts["review_fallbacks"] += 1
+                                counts["judged"] += 1
+                                progress()
+                                fid = await persist_crop(
+                                    pid,
+                                    base,
+                                    crop,
+                                    rendered,
+                                    verdict,
+                                    storage,
+                                    publication_barrier=original,
+                                )
+                                attach_collection(
+                                    pid, collection_id, user_id, figure_id=fid
+                                )
+                                counts["published"] += 1
+                                progress()
+
+                        group.create_task(
+                            bounded_map(
+                                process, todo, get_settings().pipeline.per_paper_figures
+                            )
+                        )
+                    with connect() as db:
+                        db.execute(
+                            "UPDATE papers SET ingest_status='completed' WHERE id=?",
+                            (pid,),
+                        )
+                    attach_collection(pid, collection_id, user_id)
+                    await backup(pid, storage)
+                    update_job(
+                        job_id,
+                        100,
+                        f"完成 · {len(crops)} 张图表"
+                        + (
+                            "；部分视觉判图不可用，已加入复核队列"
+                            if counts["review_fallbacks"]
+                            else ""
+                        ),
+                        "completed",
+                    )
+                    return pid
+            except BaseException as exc:
+                with connect() as db:
+                    db.execute(
+                        "UPDATE papers SET ingest_status='failed' WHERE id=?", (pid,)
+                    )
+                update_job(
+                    job_id,
+                    0,
+                    "任务中断，可恢复已有进度"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else error_message(exc),
+                    "failed",
+                )
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                raise root_error(exc)
 
 
-@serialized
-async def recrop(fid, page_number, bbox, do_snap=True):
+def attach_collection(pid, collection_id, user_id, figure_id=None):
+    if not collection_id:
+        return
     with connect() as db:
-        row = db.execute(
-            "SELECT f.*,p.webdav_pdf_path FROM figures f JOIN papers p ON p.id=f.paper_id WHERE f.id=?",
-            (fid,),
-        ).fetchone()
-    if not row:
-        raise ValueError("图表不存在")
-    storage = Storage()
-    data = await storage.get(row["webdav_pdf_path"])
-    doc = fitz.open(stream=data, filetype="pdf")
-    try:
-        if not 1 <= page_number <= len(doc):
-            raise ValueError("页码超出范围")
-        page = doc[page_number - 1]
-        if (
-            len(bbox) != 4
-            or not all(0 <= v <= 1 for v in bbox)
-            or bbox[0] >= bbox[2]
-            or bbox[1] >= bbox[3]
-        ):
-            raise ValueError("无效裁切坐标")
-        absolute = [
-            bbox[0] * page.rect.width,
-            bbox[1] * page.rect.height,
-            bbox[2] * page.rect.width,
-            bbox[3] * page.rect.height,
-        ]
-        crop = Crop(
-            page_number,
-            snap(page, absolute) if do_snap else absolute,
-            row["fig_label"],
-            row["caption"],
-            1,
+        if not db.execute(
+            "SELECT id FROM collections WHERE id=? AND user_id=?",
+            (collection_id, user_id),
+        ).fetchone():
+            return
+        ids = (
+            [figure_id]
+            if figure_id
+            else [
+                r[0]
+                for r in db.execute("SELECT id FROM figures WHERE paper_id=?", (pid,))
+            ]
         )
-        result = await asyncio.to_thread(render, doc, crop)
+        for fid in ids:
+            db.execute(
+                "INSERT OR IGNORE INTO collection_items(id,collection_id,figure_id) VALUES(?,?,?)",
+                (uuid.uuid4().hex, collection_id, fid),
+            )
+        db.execute(
+            "UPDATE collections SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (collection_id,),
+        )
+
+
+async def recrop(fid, page_number, bbox, do_snap=True):
+    async with (
+        resource_lock("maintenance", "library", shared=True),
+        resource_lock("figure", fid),
+        Storage() as storage,
+    ):
+        with connect() as db:
+            row = db.execute(
+                "SELECT f.*,p.webdav_pdf_path FROM figures f JOIN papers p ON p.id=f.paper_id WHERE f.id=?",
+                (fid,),
+            ).fetchone()
+        if not row:
+            raise ValueError("图表不存在")
+        data = await storage.get(row["webdav_pdf_path"])
+        root = get_settings().data_dir / ".pipeline" / "work"
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root) as work:
+            path = Path(work) / "paper.pdf"
+            path.write_bytes(data)
+            crop, result = await cpu_call(
+                "recrop",
+                path,
+                page=page_number,
+                bbox=bbox,
+                snap=do_snap,
+                label=row["fig_label"],
+                caption=row["caption"],
+            )
         from .vision import Verdict
 
         verdict = Verdict(
@@ -465,8 +615,6 @@ async def recrop(fid, page_number, bbox, do_snap=True):
                 "UPDATE repair_queue SET status='completed' WHERE figure_id=? AND status='pending'",
                 (fid,),
             )
-    finally:
-        doc.close()
 
 
 async def run_ingest(
@@ -483,15 +631,15 @@ async def run_ingest(
             data, metadata, user_id, job_id, collection_id=collection_id
         )
     except Exception as exc:
-        message = (
-            str(exc)
-            if isinstance(exc, (ValueError, RuntimeError))
-            else "论文处理失败，请检查源文件或远端连接后重试"
-        )
-        update_job(job_id, 0, message, "failed")
+        update_job(job_id, 0, error_message(exc), "failed")
 
 
 async def rebuild():
+    async with resource_lock("maintenance", "library"):
+        return await _rebuild()
+
+
+async def _rebuild():
     storage = Storage()
     stack = ["papers"]
     count = 0

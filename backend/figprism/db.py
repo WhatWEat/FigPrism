@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS papers (
  source_type TEXT DEFAULT 'upload', arxiv_id TEXT, venue TEXT DEFAULT 'Preprint', venue_year INTEGER,
  venue_tier TEXT, hf_upvotes INTEGER DEFAULT 0, layout_type TEXT DEFAULT 'single',
  source_urls TEXT DEFAULT '{}', domains TEXT DEFAULT '[]', webdav_pdf_path TEXT,
- ingest_status TEXT DEFAULT 'completed', uploaded_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+ ingest_status TEXT DEFAULT 'completed', pdf_uploaded INTEGER NOT NULL DEFAULT 1, uploaded_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS figures (
  id TEXT PRIMARY KEY, paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
  fig_label TEXT NOT NULL, page_number INTEGER NOT NULL, bbox TEXT NOT NULL,
@@ -71,6 +71,10 @@ def init_db(recover_jobs=False):
         if "ingest_status" not in pcolumns:
             db.execute(
                 "ALTER TABLE papers ADD COLUMN ingest_status TEXT DEFAULT 'completed'"
+            )
+        if "pdf_uploaded" not in pcolumns:
+            db.execute(
+                "ALTER TABLE papers ADD COLUMN pdf_uploaded INTEGER NOT NULL DEFAULT 1"
             )
         path = get_settings().domains_file
         if path.exists():

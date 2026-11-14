@@ -133,3 +133,53 @@ async def test_retry_transient_http_but_not_bad_credentials(client, monkeypatch)
     with pytest.raises(httpx.HTTPStatusError):
         await retry(forbidden)
     assert calls == 1
+
+
+def test_job_admission_is_atomic_and_batch_children_do_not_use_user_quota(client):
+    from concurrent.futures import ThreadPoolExecutor
+    from figprism.auth import create_user
+    from figprism.ingest import new_job, JobQueueFull
+
+    uid = create_user("parallel", "long-enough-password")
+
+    def submit(i):
+        try:
+            return new_job(uid, "ingest")
+        except JobQueueFull:
+            return None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        ids = list(pool.map(submit, range(8)))
+    assert sum(x is not None for x in ids) == 3
+    assert new_job(uid, "ingest", {"batch_id": "parent"})
+
+
+@pytest.mark.asyncio
+async def test_cancelled_native_worker_is_reaped_before_releasing_cpu_slot(
+    client, monkeypatch, tmp_path
+):
+    import sys
+    from figprism.processing import cpu_call
+
+    real = asyncio.create_subprocess_exec
+    children = []
+    started = asyncio.Event()
+
+    async def spawn(*args, **kwargs):
+        process = await real(
+            sys.executable, "-c", "import time;time.sleep(30)", **kwargs
+        )
+        children.append(process)
+        started.set()
+        return process
+
+    monkeypatch.setattr("figprism.processing.asyncio.create_subprocess_exec", spawn)
+    task = asyncio.create_task(cpu_call("inspect", tmp_path / "paper.pdf"))
+    await started.wait()
+    assert snapshot()["cpu"]["active"] == 1
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert children[0].returncode is not None
+    assert snapshot()["cpu"]["active"] == 0
+    assert not list((get_settings().data_dir / ".pipeline" / "cpu").iterdir())

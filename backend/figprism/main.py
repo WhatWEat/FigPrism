@@ -12,7 +12,12 @@ from .domains import all_domains
 @asynccontextmanager
 async def lifespan(app):
     init_db(recover_jobs=True)
-    yield
+    try:
+        yield
+    finally:
+        from .api import stop_tasks
+
+        await stop_tasks()
 
 
 app = FastAPI(title="FigPrism API", lifespan=lifespan)
@@ -82,3 +87,15 @@ def domains():
 from .api import router as api_router
 
 app.include_router(api_router)
+
+
+from .ingest import JobQueueFull
+
+
+@app.exception_handler(JobQueueFull)
+async def queue_full(request, exc):
+    return JSONResponse(
+        {"detail": str(exc)},
+        status_code=429,
+        headers={"Cache-Control": "private, no-store", "Retry-After": "15"},
+    )
