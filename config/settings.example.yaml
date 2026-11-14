@@ -1,0 +1,19 @@
+# Copy to local.yaml (ignored by Git), or run scripts/convert_config.py.
+secret_key: replace-with-a-random-secret-at-least-32-characters
+public_origin: http://localhost:3000
+cookie_secure: false # set true behind HTTPS
+webdav:
+  url: https://dav.example.com
+  username: your-username
+  password: your-password
+  root: /figprism
+vision:
+  driver: openai_mini # or codex_subagent; manual review queue, no API calls
+  base_url: https://api.openai.com/v1
+  api_key: your-api-key
+  model: gpt-4.1-mini
+# Optional local DocLayout-YOLO checkpoint. Without it, conservative geometry detection
+# queues crops for review instead of claiming model-level accuracy.
+layout_model: null
+hf_min_upvotes: 20
+cache_max_bytes: 2147483648

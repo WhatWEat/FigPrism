@@ -1,0 +1,404 @@
+- slug: multimodal-hallucination
+  name: 多模态与幻觉
+  color_dot: '#8b85d6'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - VLM / Omni 架构
+  - Contrastive Decoding (对比解码)
+  - Attention / Logit 干预
+  - Visual Grounding & 细粒度感知
+  - Visual Token 压缩与对齐
+  phrases:
+  - multimodal hallucination
+  - object hallucination
+  - visual hallucination
+  - cross-modal hallucination
+  - relation hallucination
+  - event hallucination
+  - hallucination mitigation
+  - modality bias
+  - language prior
+  - faithfulness in multimodal
+  - contrastive decoding
+  - visual contrastive decoding
+  - instruction contrastive decoding
+  - layer contrastive
+  - logit calibration
+  - logit lens
+  - attention intervention
+  - attention sink
+  - attention steering
+  - activation steering
+  - head-level intervention
+  - representation engineering
+  - vision-language model
+  - multimodal large language model
+  - omni-modal
+  - any-to-any multimodal
+  - unified multimodal
+  - native multimodal
+  - visual grounding
+  - referring expression
+  - region-level alignment
+  - set-of-mark
+  - visual prompting
+  - visual token pruning
+  - visual token merging
+  - dynamic resolution
+  acronyms:
+  - VLM
+  - LVLM
+  - MLLM
+  - VCD
+  - DoLa
+  - OPERA
+  - HALC
+  - POPE
+  - MMHal
+  exclude_terms: []
+  vlm_criteria: Identify figures relevant to 多模态与幻觉; assign sub_tags only when supported
+    by the figure and caption.
+- slug: post-training
+  name: 后训练策略
+  color_dot: '#d99474'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - RL 策略 (GRPO/PPO/RLOO)
+  - 在线/自蒸馏 (OPD/OPSD)
+  - 偏好对齐 (DPO/SimPO)
+  - 过程奖励与验证器 (PRM/RLVR)
+  - Rollout 与熵正则控制
+  phrases:
+  - post-training
+  - reinforcement learning from verifiable rewards
+  - group relative policy optimization
+  - policy gradient
+  - advantage estimation
+  - entropy collapse
+  - entropy regularization
+  - clip-higher
+  - length penalty
+  - overlong filtering
+  - asynchronous rollout
+  - off-policy reinforcement learning
+  - importance sampling
+  - on-policy distillation
+  - on-policy self-distillation
+  - self-distillation
+  - generalized knowledge distillation
+  - reverse KL
+  - forward KL
+  - trajectory distillation
+  - rationale distillation
+  - logit distillation
+  - white-box distillation
+  - teacher-student rollout
+  - privileged context distillation
+  - direct preference optimization
+  - iterative preference
+  - online preference
+  - step-level preference
+  - token-level preference
+  - process reward model
+  - outcome reward model
+  - generative reward model
+  - rubric-based reward
+  - rule-based verifier
+  - credit assignment
+  - reward hacking
+  acronyms:
+  - RLVR
+  - GRPO
+  - DAPO
+  - Dr.GRPO
+  - PPO
+  - RLOO
+  - REINFORCE++
+  - VinePPO
+  - GSPO
+  - OPD
+  - OPSD
+  - GKD
+  - DPO
+  - SimPO
+  - ORPO
+  - KTO
+  - PRM
+  - ORM
+  - GenRM
+  - RLHF
+  - RLAIF
+  exclude_terms: []
+  vlm_criteria: Identify figures relevant to 后训练策略; assign sub_tags only when supported
+    by the figure and caption.
+- slug: reasoning
+  name: 推理与计算扩展
+  color_dot: '#75a394'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - Long CoT & Test-Time Scaling
+  - MCTS / 搜索树推理
+  - LLM Routing & 动态算力分配
+  - Latent / 隐空间连续推理
+  - Diffusion / 非自回归推理
+  phrases:
+  - test-time scaling
+  - test-time compute
+  - inference-time scaling
+  - long chain-of-thought
+  - deliberative reasoning
+  - slow thinking
+  - self-correction
+  - self-verification
+  - backtracking
+  - cognitive behaviors
+  - overthinking
+  - token-efficient reasoning
+  - reasoning compression
+  - concise reasoning
+  - Monte Carlo Tree Search
+  - tree of thoughts
+  - graph of thoughts
+  - beam search reasoning
+  - best-of-N
+  - weighted self-consistency
+  - lookahead search
+  - compute-optimal scaling
+  - LLM routing
+  - model routing
+  - query routing
+  - cascade inference
+  - difficulty-aware routing
+  - adaptive computation
+  - early exit
+  - budget-constrained reasoning
+  - speculative reasoning
+  - collaborative decoding
+  - latent reasoning
+  - continuous thought
+  - implicit chain-of-thought
+  - looped transformer
+  - recurrent depth
+  - diffusion language model
+  - masked diffusion
+  - diffusion reasoning
+  - denoising chain-of-thought
+  - timestep routing
+  acronyms:
+  - CoT
+  - Long-CoT
+  - MCTS
+  - ToT
+  - Coconut
+  - dLLM
+  - MDLM
+  exclude_terms: []
+  vlm_criteria: Identify figures relevant to 推理与计算扩展; assign sub_tags only when supported
+    by the figure and caption.
+- slug: rsi-self-evolve
+  name: 自演化与递归改进
+  color_dot: '#c18caa'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - RSI (递归自我改进)
+  - Self-Play / 双模型协同演化
+  - Questioner-Solver 课程生成
+  - 无外部数据自举 (Zero-Data)
+  - Agent 工作流与代码自演化
+  phrases:
+  - recursive self-improvement
+  - self-evolving
+  - self-evolution
+  - self-improving
+  - self-bootstrapping
+  - autonomous improvement
+  - continual self-improvement
+  - zero-data reinforcement learning
+  - label-free reinforcement learning
+  - self-rewarding
+  - meta-rewarding
+  - self-play
+  - asymmetric self-play
+  - co-evolution
+  - questioner-solver
+  - proposer-solver
+  - challenger-solver
+  - generator-verifier
+  - adversarial self-play
+  - multi-agent debate
+  - multi-agent co-evolution
+  - automatic curriculum
+  - curriculum evolution
+  - self-questioning
+  - self-challenging
+  - frontier problem generation
+  - evol-instruct
+  - instruction evolution
+  - failure-driven synthesis
+  - error-driven synthesis
+  - experience replay
+  - workflow evolution
+  - automated agent design
+  acronyms:
+  - RSI
+  - SPIN
+  - SPAG
+  - SPC
+  - STaR
+  - ReST
+  - R-Zero
+  - AlphaEvolve
+  exclude_terms: []
+  vlm_criteria: Identify figures relevant to 自演化与递归改进; assign sub_tags only when supported
+    by the figure and caption.
+- slug: memory
+  name: 记忆机制
+  color_dot: '#77a2c2'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - Agent 长期/情景/图谱记忆
+  - 参数化与神经记忆 (TTT/Titans)
+  - KV Cache 压缩与淘汰
+  - 记忆读写与反思巩固
+  phrases:
+  - agent memory
+  - long-term memory
+  - episodic memory
+  - semantic memory
+  - working memory
+  - hierarchical memory
+  - memory consolidation
+  - memory reflection
+  - memory retrieval
+  - graph memory
+  - experience memory
+  - lifelong agent
+  - memory bank
+  - neural memory
+  - test-time training
+  - test-time memorization
+  - fast weights
+  - surprise-based memory
+  - associative memory
+  - memory-augmented transformer
+  - explicit memory layer
+  - linear attention memory
+  - recurrent memory
+  - knowledge editing
+  - KV cache compression
+  - KV cache eviction
+  - token eviction
+  - context compression
+  - gist token
+  - landmark attention
+  - infinite context
+  - memory slots
+  acronyms:
+  - TTT
+  - Titans
+  - MemGPT
+  - HippoRAG
+  - SnapKV
+  - H2O
+  - StreamingLLM
+  exclude_terms:
+  - DRAM
+  - SRAM
+  - NAND flash
+  - non-volatile memory
+  - resistive memory
+  - ferroelectric
+  - Alzheimer
+  - hippocampal slice
+  vlm_criteria: Identify figures relevant to 记忆机制; assign sub_tags only when supported
+    by the figure and caption.
+- slug: data-selection
+  name: 数据筛选与合成
+  color_dot: '#b4a66f'
+  arxiv_cats:
+  - cs.AI
+  - cs.CL
+  - cs.CV
+  - cs.LG
+  is_active: true
+  sub_tags:
+  - Coreset / 数据剪枝与去重
+  - Influence / 梯度归因筛选
+  - Data Mixing / 动态领域配比
+  - Rollout / 合成轨迹质检过滤
+  phrases:
+  - data selection
+  - data pruning
+  - coreset selection
+  - data attribution
+  - influence function
+  - gradient matching
+  - data valuation
+  - Data Shapley
+  - instruction following difficulty
+  - perplexity filtering
+  - learnability score
+  - reducible holdout loss
+  - data mixing
+  - domain mixing
+  - domain reweighting
+  - dynamic data mixing
+  - online batch selection
+  - curriculum data selection
+  - submodular selection
+  - facility location
+  - semantic deduplication
+  - data curation
+  - model-based filtering
+  - quality classifier
+  - synthetic data curation
+  - synthetic data filtering
+  - trajectory filtering
+  - rollout filtering
+  - rejection sampling
+  - difficulty calibration
+  - pass-rate filtering
+  - zero-variance filtering
+  - seed selection
+  acronyms:
+  - LESS
+  - TRAK
+  - IFD
+  - DEITA
+  - DoReMi
+  - RegMix
+  - SemDeDup
+  - FineWeb
+  - DCLM
+  exclude_terms:
+  - feature selection in microarray
+  - antenna selection
+  - portfolio selection
+  - genomic selection
+  vlm_criteria: Identify figures relevant to 数据筛选与合成; assign sub_tags only when supported
+    by the figure and caption.

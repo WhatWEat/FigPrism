@@ -1,0 +1,1 @@
+"""FigPrism research figure gallery."""
