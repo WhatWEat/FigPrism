@@ -1,0 +1,43 @@
+name: figprism
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8100:8100"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      FIGPRISM_PUBLIC_ORIGIN: https://figprsim.zhcanfly.com
+      FIGPRISM_COOKIE_SECURE: "true"
+      FIGPRISM_CONFIG: /app/config/local.yaml
+      FIGPRISM_DATA_DIR: /app/data
+      FIGPRISM_LAYOUT_MODEL: /app/data/models/doclayout.onnx
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

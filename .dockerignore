@@ -1,0 +1,12 @@
+.git
+.venv
+**/node_modules
+**/.next
+**/__pycache__
+**/*.egg-info
+config/*.txt
+config/local.yaml
+configs
+data
+**/test-results
+**/playwright-report

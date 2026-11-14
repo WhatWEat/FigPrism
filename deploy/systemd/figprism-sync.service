@@ -1,0 +1,10 @@
+[Unit]
+Description=FigPrism daily research figure sync
+After=docker.service network-online.target
+Requires=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/root/code/FigPrism
+ExecStart=/usr/bin/flock -n /run/figprism-sync.lock /usr/bin/docker compose exec -T backend figprism sync --source all --days 3 --limit 3
+TimeoutStartSec=6h
+Nice=10

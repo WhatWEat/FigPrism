@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily FigPrism content refresh
+[Timer]
+OnCalendar=*-*-* 06:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=300
+[Install]
+WantedBy=timers.target
