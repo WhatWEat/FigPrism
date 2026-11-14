@@ -58,3 +58,14 @@ Transient HTTP statuses and transport failures retry within configured bounds. I
 Added regression coverage for cross-process limits, cancellation and process reaping, independent slow/fast paper progress, out-of-order figure completion, manifest completeness, concurrent duplicate submissions, partial failure/resume, HTTP retries and atomic admission. Pipeline status is exposed to admins via `/api/admin/pipeline`, the admin UI and CLI.
 
 Concurrency rollout verification: 25 backend tests passed, TypeScript and Docker builds passed, and all four existing browser workflows passed on the production hostname. The admin stage monitor and shared budgets were checked live. Recovery of the interrupted real-paper import was started separately; live progress remains visible in the jobs UI.
+
+
+## figprism.ai4any.com TLS deployment (2026-11-14)
+
+The primary public URL is now `https://figprism.ai4any.com`. DNS resolves directly to this server. A dedicated Nginx virtual host proxies the existing production frontend (3100) and API (8100), with unbuffered SSE and the existing upload limit. Let's Encrypt issued a certificate expiring 2027-02-12; the existing enabled `certbot.timer` handles renewal through the Nginx plugin. Both previous domains redirect HTTP/HTTPS requests to the new host, preserving paths and query strings.
+
+The running backend has active ingestion/backfill jobs. To avoid restarting it, the new virtual host maps only the exact new HTTPS Origin to the existing backend CSRF origin (`https://fig.zhcanfly.com`); all other origins pass through unchanged. Keep this mapping paired with the existing Compose origin. No application source or in-flight job was changed for the domain cutover.
+
+Verified with TLS validation enabled: homepage and workspace routes, API health and figure listing, HTTP-to-HTTPS redirects, both legacy HTTPS redirects, real QA-account login, Secure/HttpOnly session cookies, logout, and rejection of a foreign Origin. A Chromium browser also rendered the homepage and completed login without page errors. Thumbnail, HD WebP and vector PDF requests returned 200, and SSE delivered an event through Nginx.
+
+`certbot renew --cert-name figprism.ai4any.com --dry-run --non-interactive` passed the HTTP-01 challenge and reported no renewal failures.

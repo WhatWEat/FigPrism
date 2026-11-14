@@ -2,7 +2,7 @@
 
 以论文图表为中心的科研灵感库。Next.js + FastAPI + SQLite（WAL/FTS5），WebDAV 保存原文与图像，本机保存索引、缩略图及有上限的高清缓存。
 
-生产地址：**https://fig.zhcanfly.com**。服务运行在本机 Docker Compose，Nginx 提供 HTTPS；Cloudflare 仅维护 DNS A 记录，未启用代理、Tunnel 或 Workers。旧域名 `figprsim.zhcanfly.com` 保留并重定向至新地址。
+生产地址：**https://figprism.ai4any.com**。服务运行在本机 Docker Compose，Nginx 提供 HTTPS；域名 A 记录直接指向本机。旧域名 `fig.zhcanfly.com` 和 `figprsim.zhcanfly.com` 保留并重定向至新地址。
 
 ## 已实现
 
@@ -40,10 +40,14 @@ npm run dev --prefix frontend
 docker compose build
 docker compose up -d
 # Nginx 初始配置为 deploy/nginx.conf；申请证书后以 /etc/nginx 中的生效配置为准。
-# Cloudflare A: fig.zhcanfly.com -> 本机 IPv4，proxied=false。
+# DNS A: figprism.ai4any.com -> 本机 IPv4。
 ```
 
-旧域名跳转配置在 `deploy/nginx.legacy.conf`，其 DNS 记录和 HTTPS 证书保留用于兼容原有链接。
+旧域名跳转配置在 `deploy/nginx.previous.conf` 和 `deploy/nginx.legacy.conf`，其 DNS 记录和 HTTPS 证书保留用于兼容原有链接。
+
+新域名证书使用 Certbot 的 Nginx 插件签发，`certbot.timer` 每日检查续期。可执行 `certbot renew --cert-name figprism.ai4any.com --dry-run` 验证。
+
+为不中断在途入库任务，后端继续使用 Compose 中的原有 `FIGPRISM_PUBLIC_ORIGIN=https://fig.zhcanfly.com`；新域名 Nginx 仅将精确匹配的新站 Origin 转为后端原有可信 Origin，其他来源原样转发并由后端拒绝。该映射与 Compose 配置需配套保留，Cookie 仍在新域名下使用 Secure / HttpOnly。
 
 容器仅暴露 `127.0.0.1:8100`（API）及 `127.0.0.1:3100`（Web）；Nginx 分别代理，上传上限 52MB，SSE 禁用缓冲。数据库、模型及缓存挂载 `./data`，配置挂载 `./config`。重启策略为 `unless-stopped`，日志自动轮转。
 
@@ -89,7 +93,7 @@ Playwright 测试连接实际服务，使用专门的测试账号（`data/qa/e2e
 
 ```bash
 .venv/bin/python scripts/setup_e2e.py
-E2E_BASE_URL=https://fig.zhcanfly.com npm run test:e2e --prefix frontend
+E2E_BASE_URL=https://figprism.ai4any.com npm run test:e2e --prefix frontend
 ```
 
 ## 运行边界
