@@ -232,3 +232,7 @@ node_modules/
 *.tsbuildinfo
 playwright-report/
 test-results/
+
+# Frontend source directory is not Python's lib/ build output.
+!frontend/src/lib/
+!frontend/src/lib/**
