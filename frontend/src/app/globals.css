@@ -3623,3 +3623,7 @@ button:disabled {
 .sibling-track button.outside-filter.active {
   border-color: var(--accent-ink);
 }
+
+/* Spec 011: the default feed opens directly into the gallery, without the intro banner. */
+.taxonomy-panel.taxonomy-all { display: none; }
+.feed-view-bar:has(+ .taxonomy-panel.taxonomy-all) { margin-bottom: 16px; }
