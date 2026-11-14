@@ -1,37 +1,983 @@
-'use client';
-import {useCallback,useEffect,useRef,useState} from 'react';
-import {useQuery,useQueryClient} from '@tanstack/react-query';
-import {ArrowDownToLine,ArrowLeft,ArrowRight,Bookmark,Check,ChevronDown,Code2,Copy,Crop,ExternalLink,Focus,Grid2X2,Minus,MousePointer2,Pipette,Plus,RotateCcw,Scissors,Sparkles,Type,X,ZoomIn} from 'lucide-react';
-import {api,post,put,paletteCode,rgb} from '@/lib/api';
-import {Figure,Board,archetypes,archetypeNames} from '@/lib/types';
-import {useUI} from '@/lib/store';
-import {Modal,Spinner,ErrorMessage,useUser,copyColor} from './ui';
-import {quickSave} from './figure-card';
+"use client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowDownToLine,
+  ArrowLeft,
+  ArrowRight,
+  Bookmark,
+  Check,
+  ChevronDown,
+  Code2,
+  Copy,
+  Crop,
+  ExternalLink,
+  Focus,
+  Grid2X2,
+  Minus,
+  MousePointer2,
+  Pipette,
+  Plus,
+  RotateCcw,
+  Scissors,
+  Sparkles,
+  Type,
+  X,
+  ZoomIn,
+} from "lucide-react";
+import { api, post, put, paletteCode, rgb } from "@/lib/api";
+import { Figure, Board, archetypes, archetypeNames } from "@/lib/types";
+import { useUI } from "@/lib/store";
+import { Modal, Spinner, ErrorMessage, useUser, copyColor } from "./ui";
+import { quickSave } from "./figure-card";
 
-export function Inspector({ids}:{ids:string[]}){
- const ui=useUI();const user=useUser().data?.user||null;const cache=useQueryClient();
- const result=useQuery({queryKey:['figure',ui.selectedId],queryFn:()=>api<Figure>(`/figures/${ui.selectedId}`),enabled:!!ui.selectedId});const f=result.data;
- const [focus,setFocus]=useState<string|null>(null);const [hover,setHover]=useState(false);const [picker,setPicker]=useState(false);const [zoom,setZoom]=useState(1);const [white,setWhite]=useState(false);const [serif,setSerif]=useState(false);const [format,setFormat]=useState('HEX');const [board,setBoard]=useState('');const [note,setNote]=useState('');const [saving,setSaving]=useState(false);const [cropping,setCropping]=useState(false);const [codeOpen,setCodeOpen]=useState(false);const [imageError,setImageError]=useState(false);
- const img=useRef<HTMLImageElement>(null);const pixelCanvas=useRef<HTMLCanvasElement|null>(null);const loupe=useRef<HTMLCanvasElement>(null);const [point,setPoint]=useState<{x:number;y:number;hex:string;px:number;py:number}|null>(null);
- const boards=useQuery({queryKey:['boards'],queryFn:()=>api<Board[]>('/collections'),enabled:!!user&&!!ui.selectedId}).data||[];
- useEffect(()=>{setFocus(null);setZoom(1);setPicker(false);setCropping(false);setCodeOpen(false);setPoint(null);setImageError(false);pixelCanvas.current=null;if(ui.selectedId&&user)void post(`/figures/${ui.selectedId}/view`).catch(()=>{});},[ui.selectedId,user?.id]);
- const navigate=useCallback((direction:number)=>{const index=ids.indexOf(ui.selectedId||'');const next=ids[index+direction];if(next)ui.select(next);},[ids,ui.selectedId]);
- useEffect(()=>{if(!ui.selectedId)return;const key=(e:KeyboardEvent)=>{if((e.target as HTMLElement).closest('input,textarea,select,[contenteditable]'))return;if(e.key==='ArrowLeft'){e.preventDefault();navigate(-1);}if(e.key==='ArrowRight'){e.preventDefault();navigate(1);}if(e.code==='Space'){e.preventDefault();setZoom(z=>z===1?1.8:1);}if(e.key.toLowerCase()==='i')setPicker(v=>!v);if(e.key.toLowerCase()==='s'&&f){e.preventDefault();if(user)void quickSave(f);else ui.openLogin();}if(/^[0-9]$/.test(e.key)){setFocus(e.key==='0'?null:f?.subitems[Number(e.key)-1]?.id||null);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[ui.selectedId,f,navigate,user]);
- function imageLoaded(){const image=img.current;if(!image)return;const c=document.createElement('canvas');c.width=image.naturalWidth;c.height=image.naturalHeight;c.getContext('2d',{willReadFrequently:true})?.drawImage(image,0,0);pixelCanvas.current=c;}
- function move(e:React.PointerEvent<HTMLDivElement>){if(!img.current||!f)return;const bounds=img.current.getBoundingClientRect();const nx=(e.clientX-bounds.left)/bounds.width;const ny=(e.clientY-bounds.top)/bounds.height;if(nx<0||ny<0||nx>1||ny>1){setPoint(null);return;}if(hover&&!picker){setFocus(f.subitems.find(s=>nx>=s.norm_bbox[0]&&nx<=s.norm_bbox[2]&&ny>=s.norm_bbox[1]&&ny<=s.norm_bbox[3])?.id||null);}if(picker&&pixelCanvas.current){const c=pixelCanvas.current;const px=Math.min(c.width-1,Math.floor(nx*c.width));const py=Math.min(c.height-1,Math.floor(ny*c.height));const data=c.getContext('2d',{willReadFrequently:true})!.getImageData(px,py,1,1).data;const hex='#'+[...data].slice(0,3).map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase();const parent=e.currentTarget.getBoundingClientRect();setPoint({x:e.clientX-parent.left,y:e.clientY-parent.top,px,py,hex});}}
- useEffect(()=>{if(!point||!loupe.current||!pixelCanvas.current)return;const ctx=loupe.current.getContext('2d')!;ctx.imageSmoothingEnabled=false;ctx.clearRect(0,0,112,112);ctx.drawImage(pixelCanvas.current,point.px-7,point.py-7,14,14,0,0,112,112);ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=.5;for(let i=0;i<=112;i+=8){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,112);ctx.moveTo(0,i);ctx.lineTo(112,i);ctx.stroke();}ctx.strokeStyle='#111';ctx.lineWidth=1;ctx.strokeRect(56,56,8,8);},[point]);
- async function save(){if(!user){ui.openLogin();return;}if(!f)return;setSaving(true);try{let target=board||boards[0]?.id;if(!target){const b=await post<Board>('/collections',{name:'我的灵感收藏'});target=b.id;cache.invalidateQueries({queryKey:['boards']});}await put(`/collections/${target}/items`,{figure_id:f.id,focused_subitem_id:focus,user_note:note});ui.notify('灵感和笔记已保存');cache.invalidateQueries({queryKey:['board',target]});}catch(e){ui.notify((e as Error).message);}finally{setSaving(false);}}
- async function repair(){if(!f)return;try{await post(`/figures/${f.id}/repair`);ui.notify('已加入精修队列，等待 Codex 任务处理');}catch(e){ui.notify((e as Error).message);}}
- const focused=f?.subitems.find(s=>s.id===focus);const palette=focused?.palette||f?.palette;const colors=palette?.colors.map(c=>c.hex)||[];const exportText=paletteCode(colors,format);
- return <Modal open={!!ui.selectedId} onOpenChange={open=>{if(!open)ui.select(null);}} title={f?`${f.fig_label} · 图表检视器`:'图表检视器'} className="inspector-modal">{result.isPending?<div className="inspector-loading"><Spinner/>正在加载图表</div>:result.error?<ErrorMessage error={result.error} retry={()=>result.refetch()}/>:f&&<div className="inspector-body"><section className={`inspector-canvas ${white?'white':''}`}><div className="canvas-top"><div className="capsule"><button onClick={()=>navigate(-1)} aria-label="上一张图表" disabled={ids.indexOf(f.id)<=0}><ArrowLeft size={16}/></button><span>{f.fig_label}</span><button onClick={()=>navigate(1)} aria-label="下一张图表" disabled={ids.indexOf(f.id)>=ids.length-1}><ArrowRight size={16}/></button></div><div className="capsule"><button className={picker?'active':''} onClick={()=>{setPicker(!picker);setPoint(null);}} title="吸管取色 (I)" aria-label="吸管取色"><Pipette size={16}/></button><i/><button onClick={()=>setZoom(Math.max(.5,zoom-.25))} aria-label="缩小"><Minus size={15}/></button><span className="mono">{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(Math.min(4,zoom+.25))} aria-label="放大"><Plus size={15}/></button><button onClick={()=>setZoom(1)} title="适应窗口"><Focus size={16}/></button><i/><button onClick={()=>setWhite(!white)} title="切换背景"><Grid2X2 size={16}/></button></div></div>{cropping?<CropEditor figure={f} onDone={()=>{setCropping(false);cache.invalidateQueries({queryKey:['figure',f.id]});cache.invalidateQueries({queryKey:['figures']});}} onCancel={()=>setCropping(false)}/>:<><div className="canvas-scroll"><div className={`image-stage ${picker?'picking':''}`} onPointerMove={move} onPointerLeave={()=>setPoint(null)} onClick={()=>{if(picker&&point)void copyColor(point.hex,f.id,user);}} style={{width:`${zoom*100}%`,minWidth:zoom>1?`${zoom*100}%`:undefined}}><div className="image-wrap"><img ref={img} src={f.hd_url} alt={f.caption||f.title} onLoad={imageLoaded} onError={()=>setImageError(true)} draggable={false}/>{focused&&<div className="spotlight" style={{left:`${focused.norm_bbox[0]*100}%`,top:`${focused.norm_bbox[1]*100}%`,width:`${(focused.norm_bbox[2]-focused.norm_bbox[0])*100}%`,height:`${(focused.norm_bbox[3]-focused.norm_bbox[1])*100}%`}}/>}</div>{imageError&&<p className="error-box">高清图暂时无法加载，请稍后重试。</p>}{point&&picker&&<div className="loupe" style={{left:Math.max(0,point.x-56),top:point.y-150}}><canvas width={112} height={112} ref={loupe}/><span>{point.hex}</span></div>}</div></div>{f.subitems.length>1&&<div className="sub-controls"><div className="capsule"><button className={!focus?'active':''} onClick={()=>setFocus(null)}>整图</button>{f.subitems.map(s=><button key={s.id} className={focus===s.id?'active':''} onClick={()=>setFocus(s.id)}>{s.label}</button>)}<i/><button onClick={()=>setHover(!hover)} className={hover?'active':''} title="悬停热区感应"><MousePointer2 size={14}/></button></div></div>}<div className="canvas-bottom"><span><span className="keycap">I</span> 取色 <span className="keycap">← →</span> 切图 <span className="keycap">Space</span> 缩放</span>{user&&<div><button className="button small" onClick={()=>setCropping(true)}><Scissors size={14}/>框选重切</button><button className="button small" onClick={repair}><Sparkles size={14}/>请求精修</button></div>}</div></>}</section><aside className="inspector-sidebar"><div className="paper-heading"><div className="eyebrow">THE PAPER <span className="venue-badge">{f.venue} {f.venue_year}</span>{f.venue_tier&&f.venue_tier!=='poster'&&<span className="honor-badge">{f.venue_tier}</span>}</div><h2>{f.title}</h2><p className="authors">{f.authors.join(', ')||'作者信息未提取'}</p><div className="paper-links"><a href={`/api/papers/${f.paper_id}/pdf#page=${f.page_number}`} target="_blank" rel="noreferrer"><ExternalLink size={12}/>原文 P.{f.page_number}</a>{Object.entries(f.source_urls).filter(([k])=>k!=='pdf').map(([k,v])=><a key={k} href={v} target="_blank" rel="noreferrer">{k==='html'?'arXiv HTML':k==='hf'?'HF 讨论':k==='openreview'?'OpenReview':k}<ExternalLink size={11}/></a>)}</div></div><section className="panel-section"><div className="section-label"><h3>图注 <span>CAPTION</span></h3><button onClick={()=>setSerif(!serif)} title="切换衬线阅读字体" className={`icon-button ${serif?'active':''}`}><Type size={15}/></button></div><p className={`caption-text ${serif?'serif':''}`}>{(focused?.caption||f.caption||'暂无图注').split(/(\([a-i]\))/g).map((s,i)=>/^\([a-i]\)$/.test(s)?<button key={i} className="caption-anchor" onClick={()=>setFocus(s[1])}>{s}</button>:s)}</p>{f.review_status!=='ok'&&<p className="review-note"><span/>自动提取 · 裁切待复核</p>}</section><section className="panel-section"><div className="section-label"><h3>科研配色 <span>{focus?`SUBFIGURE ${focus.toUpperCase()}`:'PALETTE'}</span></h3><span className="subtle-label">{colors.length} COLORS</span></div>{palette&&<><div className="palette-strip">{palette.colors.map(c=><button key={c.hex} title={`复制 ${c.hex}`} onClick={()=>copyColor(c.hex,f.id,user)} style={{background:c.hex}}><span style={{color:c.l>.65?'#334155':'white'}}>{c.hex}</span></button>)}</div>{palette.pairs.length>0&&<div className="color-pairs">{palette.pairs.map((p,i)=><div className="color-pair" key={i} style={{background:p.fill,borderColor:p.stroke}}><button onClick={()=>copyColor(p.fill,f.id,user)}><small>FILL</small><code>{p.fill}</code></button><button onClick={()=>copyColor(p.stroke,f.id,user)} style={{color:p.stroke}}><small>STROKE</small><code>{p.stroke}</code></button></div>)}</div>}{palette.neutrals.length>0&&<div className="neutral-row"><span>坐标轴 / 中性色</span>{palette.neutrals.map(c=><button key={c} onClick={()=>copyColor(c,f.id,user)}><i style={{background:c}}/><code>{c}</code></button>)}</div>}<div className="format-tabs">{['HEX','RGB','Matplotlib','LaTeX','CSS'].map(t=><button key={t} className={format===t?'active':''} onClick={()=>setFormat(t)}>{t}</button>)}</div><div className="code-box"><pre>{exportText||'暂无彩色像素'}</pre><button className="icon-button" aria-label="复制整套配色" onClick={async()=>{try{await navigator.clipboard.writeText(exportText);ui.notify('整套配色已复制');}catch{ui.notify('无法自动复制，请手动选择代码');}}}><Copy size={14}/></button></div></>}</section><section className="panel-section"><div className="section-label"><h3>工程透视 <span>DETAILS</span></h3></div><div className="spec-grid"><div><span>宽高比</span><strong className="mono">{f.aspect_ratio.toFixed(2)} : 1</strong></div><div><span>论文版式</span><strong>{f.layout_type==='double'?'双栏':'单栏'} · {f.span_type==='full'?'通栏宽图':'半栏窄图'}</strong></div><div><span>内嵌字体</span><strong>{f.fonts.join(', ')||'未检测到'}</strong></div><div><span>提取方式</span><strong>{f.extract_method==='tex_raw'?'TeX 原始矢量':'PDF 矢量切片'}</strong></div></div><a className="button primary full" href={focused?.has_raw?`/api/figures/${f.id}/subitems/${focus}/raw`:f.raw_url} download><ArrowDownToLine size={16}/>{focused?.has_raw?`下载子图 (${focus}) 矢量 PDF`:'下载矢量 PDF'}<span className="button-tag">VECTOR</span></a><a className="download-secondary" href={f.hd_url} download={`${f.fig_label}.webp`}>下载高清 WebP <ArrowDownToLine size={12}/></a>{f.tikz_code&&<><button className="text-button" onClick={()=>setCodeOpen(!codeOpen)}><Code2 size={14}/>TikZ / PGFPlots 源码 <ChevronDown size={14}/></button>{codeOpen&&<div className="code-box"><pre>{f.tikz_code}</pre><button className="icon-button" onClick={()=>{navigator.clipboard.writeText(f.tikz_code||'');ui.notify('TikZ 源码已复制');}}><Copy size={14}/></button></div>}</>}{user&&<label className="type-editor">图表分类<select value={f.archetype} onChange={async e=>{try{await api(`/figures/${f.id}`,{method:'PATCH',body:JSON.stringify({archetype:e.target.value,sub_tags:f.sub_tags})});cache.invalidateQueries({queryKey:['figure',f.id]});cache.invalidateQueries({queryKey:['figures']});}catch(e){ui.notify((e as Error).message);}}}>{archetypes.map(a=><option key={a} value={a}>{archetypeNames[a]}</option>)}</select></label>}</section><section className="panel-section save-panel"><h3><Bookmark size={15}/>钉入灵感看板</h3>{user?<><select aria-label="目标看板" value={board} onChange={e=>setBoard(e.target.value)}><option value="">{boards[0]?.name||'我的灵感收藏（自动创建）'}</option>{boards.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select><textarea aria-label="灵感笔记" rows={2} placeholder="记一笔灵感，如：用虚线区分训练与推理流…" value={note} onChange={e=>setNote(e.target.value)}/>{focus&&<small>将同时保存子图 ({focus}) 聚焦状态</small>}</>:<p className="muted">登录后，把构图与配色灵感留给未来的自己。</p>}<button className="button full" disabled={saving} onClick={save}>{saving?<Spinner/>:<Plus size={15}/>} {user?'保存至看板':'登录并收藏'}</button></section></aside></div>}</Modal>;
+export function Inspector({ ids }: { ids: string[] }) {
+  const ui = useUI();
+  const user = useUser().data?.user || null;
+  const cache = useQueryClient();
+  const result = useQuery({
+    queryKey: ["figure", ui.selectedId],
+    queryFn: () => api<Figure>(`/figures/${ui.selectedId}`),
+    enabled: !!ui.selectedId,
+  });
+  const f = result.data;
+  const [focus, setFocus] = useState<string | null>(null);
+  const [hover, setHover] = useState(false);
+  const [picker, setPicker] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [white, setWhite] = useState(false);
+  const [serif, setSerif] = useState(false);
+  const [format, setFormat] = useState("HEX");
+  const [board, setBoard] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [cropping, setCropping] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const img = useRef<HTMLImageElement>(null);
+  const pixelCanvas = useRef<HTMLCanvasElement | null>(null);
+  const loupe = useRef<HTMLCanvasElement>(null);
+  const [point, setPoint] = useState<{
+    x: number;
+    y: number;
+    hex: string;
+    px: number;
+    py: number;
+  } | null>(null);
+  const boards =
+    useQuery({
+      queryKey: ["boards"],
+      queryFn: () => api<Board[]>("/collections"),
+      enabled: !!user && !!ui.selectedId,
+    }).data || [];
+  useEffect(() => {
+    setFocus(ui.selectedContext?.focus || null);
+    setNote(ui.selectedContext?.note || "");
+    if (ui.selectedContext?.boardId) setBoard(ui.selectedContext.boardId);
+    setZoom(1);
+    setPicker(false);
+    setCropping(false);
+    setCodeOpen(false);
+    setPoint(null);
+    setImageError(false);
+    pixelCanvas.current = null;
+    if (ui.selectedId && user)
+      void post(`/figures/${ui.selectedId}/view`).catch(() => {});
+  }, [ui.selectedId, ui.selectedContext, user?.id]);
+  const navigate = useCallback(
+    (direction: number) => {
+      const index = ids.indexOf(ui.selectedId || "");
+      const next = ids[index + direction];
+      if (next) ui.select(next);
+    },
+    [ids, ui.selectedId],
+  );
+  useEffect(() => {
+    if (!ui.selectedId) return;
+    const key = (e: KeyboardEvent) => {
+      if (
+        (e.target as HTMLElement).closest(
+          "input,textarea,select,[contenteditable]",
+        )
+      )
+        return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        navigate(-1);
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        navigate(1);
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        setZoom((z) => (z === 1 ? 1.8 : 1));
+      }
+      if (e.key.toLowerCase() === "i") setPicker((v) => !v);
+      if (e.key.toLowerCase() === "s" && f) {
+        e.preventDefault();
+        if (user) void quickSave(f);
+        else ui.openLogin();
+      }
+      if (/^[0-9]$/.test(e.key)) {
+        setFocus(
+          e.key === "0" ? null : f?.subitems[Number(e.key) - 1]?.id || null,
+        );
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [ui.selectedId, f, navigate, user]);
+  function imageLoaded() {
+    const image = img.current;
+    if (!image) return;
+    const c = document.createElement("canvas");
+    c.width = image.naturalWidth;
+    c.height = image.naturalHeight;
+    c.getContext("2d", { willReadFrequently: true })?.drawImage(image, 0, 0);
+    pixelCanvas.current = c;
+  }
+  function move(e: React.PointerEvent<HTMLDivElement>) {
+    if (!img.current || !f) return;
+    const bounds = img.current.getBoundingClientRect();
+    const nx = (e.clientX - bounds.left) / bounds.width;
+    const ny = (e.clientY - bounds.top) / bounds.height;
+    if (nx < 0 || ny < 0 || nx > 1 || ny > 1) {
+      setPoint(null);
+      return;
+    }
+    if (hover && !picker) {
+      setFocus(
+        f.subitems.find(
+          (s) =>
+            nx >= s.norm_bbox[0] &&
+            nx <= s.norm_bbox[2] &&
+            ny >= s.norm_bbox[1] &&
+            ny <= s.norm_bbox[3],
+        )?.id || null,
+      );
+    }
+    if (picker && pixelCanvas.current) {
+      const c = pixelCanvas.current;
+      const px = Math.min(c.width - 1, Math.floor(nx * c.width));
+      const py = Math.min(c.height - 1, Math.floor(ny * c.height));
+      const data = c
+        .getContext("2d", { willReadFrequently: true })!
+        .getImageData(px, py, 1, 1).data;
+      const hex =
+        "#" +
+        [...data]
+          .slice(0, 3)
+          .map((v) => v.toString(16).padStart(2, "0"))
+          .join("")
+          .toUpperCase();
+      const parent = e.currentTarget.getBoundingClientRect();
+      setPoint({
+        x: e.clientX - parent.left,
+        y: e.clientY - parent.top,
+        px,
+        py,
+        hex,
+      });
+    }
+  }
+  useEffect(() => {
+    if (!point || !loupe.current || !pixelCanvas.current) return;
+    const ctx = loupe.current.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, 112, 112);
+    ctx.drawImage(
+      pixelCanvas.current,
+      point.px - 7,
+      point.py - 7,
+      14,
+      14,
+      0,
+      0,
+      112,
+      112,
+    );
+    ctx.strokeStyle = "rgba(255,255,255,.35)";
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 112; i += 8) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 112);
+      ctx.moveTo(0, i);
+      ctx.lineTo(112, i);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(56, 56, 8, 8);
+  }, [point]);
+  async function save() {
+    if (!user) {
+      ui.openLogin();
+      return;
+    }
+    if (!f) return;
+    setSaving(true);
+    try {
+      let target = board || boards[0]?.id;
+      if (!target) {
+        const b = await post<Board>("/collections", { name: "我的灵感收藏" });
+        target = b.id;
+        cache.invalidateQueries({ queryKey: ["boards"] });
+      }
+      await put(`/collections/${target}/items`, {
+        figure_id: f.id,
+        focused_subitem_id: focus,
+        user_note: note,
+      });
+      ui.notify("灵感和笔记已保存");
+      cache.invalidateQueries({ queryKey: ["board", target] });
+    } catch (e) {
+      ui.notify((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function repair() {
+    if (!f) return;
+    try {
+      await post(`/figures/${f.id}/repair`);
+      ui.notify("已加入精修队列，等待 Codex 任务处理");
+    } catch (e) {
+      ui.notify((e as Error).message);
+    }
+  }
+  const focused = f?.subitems.find((s) => s.id === focus);
+  const palette = focused?.palette || f?.palette;
+  const colors = palette?.colors.map((c) => c.hex) || [];
+  const exportText = paletteCode(colors, format);
+  return (
+    <Modal
+      open={!!ui.selectedId}
+      onOpenChange={(open) => {
+        if (!open) ui.select(null);
+      }}
+      title={f ? `${f.fig_label} · 图表检视器` : "图表检视器"}
+      className="inspector-modal"
+    >
+      {result.isPending ? (
+        <div className="inspector-loading">
+          <Spinner />
+          正在加载图表
+        </div>
+      ) : result.error ? (
+        <ErrorMessage error={result.error} retry={() => result.refetch()} />
+      ) : (
+        f && (
+          <div className="inspector-body">
+            <section className={`inspector-canvas ${white ? "white" : ""}`}>
+              <div className="canvas-top">
+                <div className="capsule">
+                  <button
+                    onClick={() => navigate(-1)}
+                    aria-label="上一张图表"
+                    disabled={ids.indexOf(f.id) <= 0}
+                  >
+                    <ArrowLeft size={16} />
+                  </button>
+                  <span>{f.fig_label}</span>
+                  <button
+                    onClick={() => navigate(1)}
+                    aria-label="下一张图表"
+                    disabled={ids.indexOf(f.id) >= ids.length - 1}
+                  >
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+                <div className="capsule">
+                  <button
+                    className={picker ? "active" : ""}
+                    onClick={() => {
+                      setPicker(!picker);
+                      setPoint(null);
+                    }}
+                    title="吸管取色 (I)"
+                    aria-label="吸管取色"
+                  >
+                    <Pipette size={16} />
+                  </button>
+                  <i />
+                  <button
+                    onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
+                    aria-label="缩小"
+                  >
+                    <Minus size={15} />
+                  </button>
+                  <span className="mono">{Math.round(zoom * 100)}%</span>
+                  <button
+                    onClick={() => setZoom(Math.min(4, zoom + 0.25))}
+                    aria-label="放大"
+                  >
+                    <Plus size={15} />
+                  </button>
+                  <button onClick={() => setZoom(1)} title="适应窗口">
+                    <Focus size={16} />
+                  </button>
+                  <i />
+                  <button onClick={() => setWhite(!white)} title="切换背景">
+                    <Grid2X2 size={16} />
+                  </button>
+                </div>
+              </div>
+              {cropping ? (
+                <CropEditor
+                  figure={f}
+                  onDone={() => {
+                    setCropping(false);
+                    cache.invalidateQueries({ queryKey: ["figure", f.id] });
+                    cache.invalidateQueries({ queryKey: ["figures"] });
+                  }}
+                  onCancel={() => setCropping(false)}
+                />
+              ) : (
+                <>
+                  <div className="canvas-scroll">
+                    <div
+                      className={`image-stage ${picker ? "picking" : ""}`}
+                      onPointerMove={move}
+                      onPointerLeave={() => setPoint(null)}
+                      onClick={() => {
+                        if (picker && point)
+                          void copyColor(point.hex, f.id, user);
+                      }}
+                      style={{
+                        width: `${zoom * 100}%`,
+                        minWidth: zoom > 1 ? `${zoom * 100}%` : undefined,
+                      }}
+                    >
+                      <div className="image-wrap">
+                        <img
+                          ref={img}
+                          src={f.hd_url}
+                          alt={f.caption || f.title}
+                          onLoad={imageLoaded}
+                          onError={() => setImageError(true)}
+                          draggable={false}
+                        />
+                        {focused && (
+                          <div
+                            className="spotlight"
+                            style={{
+                              left: `${focused.norm_bbox[0] * 100}%`,
+                              top: `${focused.norm_bbox[1] * 100}%`,
+                              width: `${(focused.norm_bbox[2] - focused.norm_bbox[0]) * 100}%`,
+                              height: `${(focused.norm_bbox[3] - focused.norm_bbox[1]) * 100}%`,
+                            }}
+                          />
+                        )}
+                      </div>
+                      {imageError && (
+                        <p className="error-box">
+                          高清图暂时无法加载，请稍后重试。
+                        </p>
+                      )}
+                      {point && picker && (
+                        <div
+                          className="loupe"
+                          style={{
+                            left: Math.max(0, point.x - 56),
+                            top: point.y - 150,
+                          }}
+                        >
+                          <canvas width={112} height={112} ref={loupe} />
+                          <span>{point.hex}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {f.subitems.length > 1 && (
+                    <div className="sub-controls">
+                      <div className="capsule">
+                        <button
+                          className={!focus ? "active" : ""}
+                          onClick={() => setFocus(null)}
+                        >
+                          整图
+                        </button>
+                        {f.subitems.map((s) => (
+                          <button
+                            key={s.id}
+                            className={focus === s.id ? "active" : ""}
+                            onClick={() => setFocus(s.id)}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                        <i />
+                        <button
+                          onClick={() => setHover(!hover)}
+                          className={hover ? "active" : ""}
+                          title="悬停热区感应"
+                        >
+                          <MousePointer2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="canvas-bottom">
+                    <span>
+                      <span className="keycap">I</span> 取色{" "}
+                      <span className="keycap">← →</span> 切图{" "}
+                      <span className="keycap">Space</span> 缩放
+                    </span>
+                    {user && (
+                      <div>
+                        <button
+                          className="button small"
+                          onClick={() => setCropping(true)}
+                        >
+                          <Scissors size={14} />
+                          框选重切
+                        </button>
+                        <button className="button small" onClick={repair}>
+                          <Sparkles size={14} />
+                          请求精修
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+            <aside className="inspector-sidebar">
+              <div className="paper-heading">
+                <div className="eyebrow">
+                  THE PAPER{" "}
+                  <span className="venue-badge">
+                    {f.venue} {f.venue_year}
+                  </span>
+                  {f.venue_tier && f.venue_tier !== "poster" && (
+                    <span className="honor-badge">{f.venue_tier}</span>
+                  )}
+                </div>
+                <h2>{f.title}</h2>
+                <p className="authors">
+                  {f.authors.join(", ") || "作者信息未提取"}
+                </p>
+                <div className="paper-links">
+                  <a
+                    href={`/api/papers/${f.paper_id}/pdf#page=${f.page_number}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink size={12} />
+                    原文 P.{f.page_number}
+                  </a>
+                  {Object.entries(f.source_urls)
+                    .filter(([k]) => k !== "pdf")
+                    .map(([k, v]) => (
+                      <a key={k} href={v} target="_blank" rel="noreferrer">
+                        {k === "html"
+                          ? "arXiv HTML"
+                          : k === "hf"
+                            ? "HF 讨论"
+                            : k === "openreview"
+                              ? "OpenReview"
+                              : k}
+                        <ExternalLink size={11} />
+                      </a>
+                    ))}
+                </div>
+              </div>
+              <section className="panel-section">
+                <div className="section-label">
+                  <h3>
+                    图注 <span>CAPTION</span>
+                  </h3>
+                  <button
+                    onClick={() => setSerif(!serif)}
+                    title="切换衬线阅读字体"
+                    className={`icon-button ${serif ? "active" : ""}`}
+                  >
+                    <Type size={15} />
+                  </button>
+                </div>
+                <p className={`caption-text ${serif ? "serif" : ""}`}>
+                  {(focused?.caption || f.caption || "暂无图注")
+                    .split(/(\([a-i]\))/g)
+                    .map((s, i) =>
+                      /^\([a-i]\)$/.test(s) ? (
+                        <button
+                          key={i}
+                          className="caption-anchor"
+                          onClick={() => setFocus(s[1])}
+                        >
+                          {s}
+                        </button>
+                      ) : (
+                        s
+                      ),
+                    )}
+                </p>
+                {f.review_status !== "ok" && (
+                  <p className="review-note">
+                    <span />
+                    自动提取 · 裁切待复核
+                  </p>
+                )}
+              </section>
+              <section className="panel-section">
+                <div className="section-label">
+                  <h3>
+                    科研配色{" "}
+                    <span>
+                      {focus ? `SUBFIGURE ${focus.toUpperCase()}` : "PALETTE"}
+                    </span>
+                  </h3>
+                  <span className="subtle-label">{colors.length} COLORS</span>
+                </div>
+                {palette && (
+                  <>
+                    <div className="palette-strip">
+                      {palette.colors.map((c) => (
+                        <button
+                          key={c.hex}
+                          title={`复制 ${c.hex}`}
+                          onClick={() => copyColor(c.hex, f.id, user)}
+                          style={{ background: c.hex }}
+                        >
+                          <span
+                            style={{ color: c.l > 0.65 ? "#334155" : "white" }}
+                          >
+                            {c.hex}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {palette.pairs.length > 0 && (
+                      <div className="color-pairs">
+                        {palette.pairs.map((p, i) => (
+                          <div
+                            className="color-pair"
+                            key={i}
+                            style={{
+                              background: p.fill,
+                              borderColor: p.stroke,
+                            }}
+                          >
+                            <button
+                              onClick={() => copyColor(p.fill, f.id, user)}
+                            >
+                              <small>FILL</small>
+                              <code>{p.fill}</code>
+                            </button>
+                            <button
+                              onClick={() => copyColor(p.stroke, f.id, user)}
+                              style={{ color: p.stroke }}
+                            >
+                              <small>STROKE</small>
+                              <code>{p.stroke}</code>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {palette.neutrals.length > 0 && (
+                      <div className="neutral-row">
+                        <span>坐标轴 / 中性色</span>
+                        {palette.neutrals.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => copyColor(c, f.id, user)}
+                          >
+                            <i style={{ background: c }} />
+                            <code>{c}</code>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="format-tabs">
+                      {["HEX", "RGB", "Matplotlib", "LaTeX", "CSS"].map((t) => (
+                        <button
+                          key={t}
+                          className={format === t ? "active" : ""}
+                          onClick={() => setFormat(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="code-box">
+                      <pre>{exportText || "暂无彩色像素"}</pre>
+                      <button
+                        className="icon-button"
+                        aria-label="复制整套配色"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(exportText);
+                            ui.notify("整套配色已复制");
+                          } catch {
+                            ui.notify("无法自动复制，请手动选择代码");
+                          }
+                        }}
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </section>
+              <section className="panel-section">
+                <div className="section-label">
+                  <h3>
+                    工程透视 <span>DETAILS</span>
+                  </h3>
+                </div>
+                <div className="spec-grid">
+                  <div>
+                    <span>宽高比</span>
+                    <strong className="mono">
+                      {f.aspect_ratio.toFixed(2)} : 1
+                    </strong>
+                  </div>
+                  <div>
+                    <span>论文版式</span>
+                    <strong>
+                      {f.layout_type === "double" ? "双栏" : "单栏"} ·{" "}
+                      {f.span_type === "full" ? "通栏宽图" : "半栏窄图"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>内嵌字体</span>
+                    <strong>{f.fonts.join(", ") || "未检测到"}</strong>
+                  </div>
+                  <div>
+                    <span>提取方式</span>
+                    <strong>
+                      {f.extract_method === "tex_raw"
+                        ? "TeX 原始矢量"
+                        : "PDF 矢量切片"}
+                    </strong>
+                  </div>
+                </div>
+                <a
+                  className="button primary full"
+                  href={
+                    focused?.has_raw
+                      ? `/api/figures/${f.id}/subitems/${focus}/raw`
+                      : f.raw_url
+                  }
+                  download
+                >
+                  <ArrowDownToLine size={16} />
+                  {focused?.has_raw
+                    ? `下载子图 (${focus}) 矢量 PDF`
+                    : "下载矢量 PDF"}
+                  <span className="button-tag">VECTOR</span>
+                </a>
+                <a
+                  className="download-secondary"
+                  href={f.hd_url}
+                  download={`${f.fig_label}.webp`}
+                >
+                  下载高清 WebP <ArrowDownToLine size={12} />
+                </a>
+                {f.tikz_code && (
+                  <>
+                    <button
+                      className="text-button"
+                      onClick={() => setCodeOpen(!codeOpen)}
+                    >
+                      <Code2 size={14} />
+                      TikZ / PGFPlots 源码 <ChevronDown size={14} />
+                    </button>
+                    {codeOpen && (
+                      <div className="code-box">
+                        <pre>{f.tikz_code}</pre>
+                        <button
+                          className="icon-button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(f.tikz_code || "");
+                            ui.notify("TikZ 源码已复制");
+                          }}
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                {user && (
+                  <label className="type-editor">
+                    图表分类
+                    <select
+                      value={f.archetype}
+                      onChange={async (e) => {
+                        try {
+                          await api(`/figures/${f.id}`, {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                              archetype: e.target.value,
+                              sub_tags: f.sub_tags,
+                            }),
+                          });
+                          cache.invalidateQueries({
+                            queryKey: ["figure", f.id],
+                          });
+                          cache.invalidateQueries({ queryKey: ["figures"] });
+                        } catch (e) {
+                          ui.notify((e as Error).message);
+                        }
+                      }}
+                    >
+                      {archetypes.map((a) => (
+                        <option key={a} value={a}>
+                          {archetypeNames[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </section>
+              <section className="panel-section save-panel">
+                <h3>
+                  <Bookmark size={15} />
+                  钉入灵感看板
+                </h3>
+                {user ? (
+                  <>
+                    <select
+                      aria-label="目标看板"
+                      value={board}
+                      onChange={(e) => setBoard(e.target.value)}
+                    >
+                      <option value="">
+                        {boards[0]?.name || "我的灵感收藏（自动创建）"}
+                      </option>
+                      {boards.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      aria-label="灵感笔记"
+                      rows={2}
+                      placeholder="记一笔灵感，如：用虚线区分训练与推理流…"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                    />
+                    {focus && <small>将同时保存子图 ({focus}) 聚焦状态</small>}
+                  </>
+                ) : (
+                  <p className="muted">
+                    登录后，把构图与配色灵感留给未来的自己。
+                  </p>
+                )}
+                <button
+                  className="button full"
+                  disabled={saving}
+                  onClick={save}
+                >
+                  {saving ? <Spinner /> : <Plus size={15} />}{" "}
+                  {user ? "保存至看板" : "登录并收藏"}
+                </button>
+              </section>
+            </aside>
+          </div>
+        )
+      )}
+    </Modal>
+  );
 }
 
-function CropEditor({figure:f,onDone,onCancel}:{figure:Figure;onDone:()=>void;onCancel:()=>void}){
- const [page,setPage]=useState(f.page_number);const [total,setTotal]=useState(150);const [src,setSrc]=useState('');const [box,setBox]=useState<number[]>([.1,.1,.9,.5]);const [snap,setSnap]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState<Error|null>(null);const image=useRef<HTMLImageElement>(null);const drag=useRef<{start:number[];box:number[];mode:string}|null>(null);const ui=useUI();
- useEffect(()=>{const abort=new AbortController();let url='';setSrc('');setError(null);fetch(`/api/figures/${f.id}/page?page=${page}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('无法加载 PDF 原页');setTotal(Number(r.headers.get('X-Page-Count')||1));if(page===f.page_number)setBox(JSON.parse(r.headers.get('X-Crop-Bbox')||'[0.1,0.1,0.9,0.5]'));else setBox([.1,.1,.9,.5]);url=URL.createObjectURL(await r.blob());setSrc(url);}).catch(e=>{if(e.name!=='AbortError')setError(e);});return()=>{abort.abort();if(url)URL.revokeObjectURL(url);};},[page,f.id]);
- function coords(e:React.PointerEvent){const r=image.current!.getBoundingClientRect();return [Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))];}
- function down(e:React.PointerEvent,mode='new'){e.preventDefault();e.stopPropagation();if(!image.current)return;e.currentTarget.setPointerCapture(e.pointerId);drag.current={start:coords(e),box:[...box],mode};if(mode==='new'){const [x,y]=coords(e);setBox([x,y,x,y]);}}
- function move(e:React.PointerEvent){const d=drag.current;if(!d)return;const [x,y]=coords(e);if(d.mode==='new'){setBox([Math.min(x,d.start[0]),Math.min(y,d.start[1]),Math.max(x,d.start[0]),Math.max(y,d.start[1])]);return;}const b=[...d.box];if(d.mode==='move'){const dx=Math.max(-b[0],Math.min(1-b[2],x-d.start[0]));const dy=Math.max(-b[1],Math.min(1-b[3],y-d.start[1]));setBox([b[0]+dx,b[1]+dy,b[2]+dx,b[3]+dy]);return;}if(d.mode.includes('w'))b[0]=Math.min(x,b[2]-.01);if(d.mode.includes('e'))b[2]=Math.max(x,b[0]+.01);if(d.mode.includes('n'))b[1]=Math.min(y,b[3]-.01);if(d.mode.includes('s'))b[3]=Math.max(y,b[1]+.01);setBox(b);}
- async function submit(){setBusy(true);setError(null);try{await post(`/figures/${f.id}/recrop`,{page,bbox:box,snap_vector:snap});ui.notify('裁切、配色和矢量文件已更新');onDone();}catch(e){setError(e as Error);}finally{setBusy(false);}}
- return <div className="crop-editor"><div className="crop-toolbar"><button className="icon-button" disabled={page<=1} onClick={()=>setPage(page-1)} aria-label="上一页"><ArrowLeft size={15}/></button><span>第 {page} / {total} 页</span><button className="icon-button" disabled={page>=total} onClick={()=>setPage(page+1)} aria-label="下一页"><ArrowRight size={15}/></button><label><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/>自动矢量吸附</label></div><div className="crop-scroll">{!src&&!error?<Spinner/>:src&&<div className="crop-page" onPointerDown={e=>down(e)} onPointerMove={move} onPointerUp={()=>{drag.current=null;}}><img ref={image} src={src} alt="PDF 原页，拖动框选图表" draggable={false}/><div className="crop-box" style={{left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`}} onPointerDown={e=>down(e,'move')}>{['nw','n','ne','e','se','s','sw','w'].map(h=><span key={h} className={`crop-handle ${h}`} onPointerDown={e=>down(e,h)}/>)}</div></div>}</div><ErrorMessage error={error}/><div className="crop-footer"><button className="button" onClick={onCancel}>取消</button><button className="button primary" disabled={busy||!src||box[2]-box[0]<.01} onClick={submit}>{busy?<Spinner/>:<Check size={15}/>}确认重切并刷新配色</button></div></div>;
+function CropEditor({
+  figure: f,
+  onDone,
+  onCancel,
+}: {
+  figure: Figure;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [page, setPage] = useState(f.page_number);
+  const [total, setTotal] = useState(150);
+  const [src, setSrc] = useState("");
+  const [box, setBox] = useState<number[]>([0.1, 0.1, 0.9, 0.5]);
+  const [snap, setSnap] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const image = useRef<HTMLImageElement>(null);
+  const drag = useRef<{ start: number[]; box: number[]; mode: string } | null>(
+    null,
+  );
+  const ui = useUI();
+  useEffect(() => {
+    const abort = new AbortController();
+    let url = "";
+    setSrc("");
+    setError(null);
+    fetch(`/api/figures/${f.id}/page?page=${page}`, { signal: abort.signal })
+      .then(async (r) => {
+        if (!r.ok) throw new Error("无法加载 PDF 原页");
+        setTotal(Number(r.headers.get("X-Page-Count") || 1));
+        if (page === f.page_number)
+          setBox(
+            JSON.parse(r.headers.get("X-Crop-Bbox") || "[0.1,0.1,0.9,0.5]"),
+          );
+        else setBox([0.1, 0.1, 0.9, 0.5]);
+        url = URL.createObjectURL(await r.blob());
+        setSrc(url);
+      })
+      .catch((e) => {
+        if (e.name !== "AbortError") setError(e);
+      });
+    return () => {
+      abort.abort();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [page, f.id]);
+  function coords(e: React.PointerEvent) {
+    const r = image.current!.getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+      Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
+    ];
+  }
+  function down(e: React.PointerEvent, mode = "new") {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!image.current) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { start: coords(e), box: [...box], mode };
+    if (mode === "new") {
+      const [x, y] = coords(e);
+      setBox([x, y, x, y]);
+    }
+  }
+  function move(e: React.PointerEvent) {
+    const d = drag.current;
+    if (!d) return;
+    const [x, y] = coords(e);
+    if (d.mode === "new") {
+      setBox([
+        Math.min(x, d.start[0]),
+        Math.min(y, d.start[1]),
+        Math.max(x, d.start[0]),
+        Math.max(y, d.start[1]),
+      ]);
+      return;
+    }
+    const b = [...d.box];
+    if (d.mode === "move") {
+      const dx = Math.max(-b[0], Math.min(1 - b[2], x - d.start[0]));
+      const dy = Math.max(-b[1], Math.min(1 - b[3], y - d.start[1]));
+      setBox([b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]);
+      return;
+    }
+    if (d.mode.includes("w")) b[0] = Math.min(x, b[2] - 0.01);
+    if (d.mode.includes("e")) b[2] = Math.max(x, b[0] + 0.01);
+    if (d.mode.includes("n")) b[1] = Math.min(y, b[3] - 0.01);
+    if (d.mode.includes("s")) b[3] = Math.max(y, b[1] + 0.01);
+    setBox(b);
+  }
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await post(`/figures/${f.id}/recrop`, {
+        page,
+        bbox: box,
+        snap_vector: snap,
+      });
+      ui.notify("裁切、配色和矢量文件已更新");
+      onDone();
+    } catch (e) {
+      setError(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="crop-editor">
+      <div className="crop-toolbar">
+        <button
+          className="icon-button"
+          disabled={page <= 1}
+          onClick={() => setPage(page - 1)}
+          aria-label="上一页"
+        >
+          <ArrowLeft size={15} />
+        </button>
+        <span>
+          第 {page} / {total} 页
+        </span>
+        <button
+          className="icon-button"
+          disabled={page >= total}
+          onClick={() => setPage(page + 1)}
+          aria-label="下一页"
+        >
+          <ArrowRight size={15} />
+        </button>
+        <label>
+          <input
+            type="checkbox"
+            checked={snap}
+            onChange={(e) => setSnap(e.target.checked)}
+          />
+          自动矢量吸附
+        </label>
+      </div>
+      <div className="crop-scroll">
+        {!src && !error ? (
+          <Spinner />
+        ) : (
+          src && (
+            <div
+              className="crop-page"
+              onPointerDown={(e) => down(e)}
+              onPointerMove={move}
+              onPointerUp={() => {
+                drag.current = null;
+              }}
+            >
+              <img
+                ref={image}
+                src={src}
+                alt="PDF 原页，拖动框选图表"
+                draggable={false}
+              />
+              <div
+                className="crop-box"
+                style={{
+                  left: `${box[0] * 100}%`,
+                  top: `${box[1] * 100}%`,
+                  width: `${(box[2] - box[0]) * 100}%`,
+                  height: `${(box[3] - box[1]) * 100}%`,
+                }}
+                onPointerDown={(e) => down(e, "move")}
+              >
+                {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => (
+                  <span
+                    key={h}
+                    className={`crop-handle ${h}`}
+                    onPointerDown={(e) => down(e, h)}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        )}
+      </div>
+      <ErrorMessage error={error} />
+      <div className="crop-footer">
+        <button className="button" onClick={onCancel}>
+          取消
+        </button>
+        <button
+          className="button primary"
+          disabled={busy || !src || box[2] - box[0] < 0.01}
+          onClick={submit}
+        >
+          {busy ? <Spinner /> : <Check size={15} />}确认重切并刷新配色
+        </button>
+      </div>
+    </div>
+  );
 }
