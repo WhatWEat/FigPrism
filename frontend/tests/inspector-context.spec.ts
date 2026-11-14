@@ -143,6 +143,21 @@ test("slow image switches keep the workspace mounted and late loads cannot overw
     ),
   ).toBeTruthy();
   await expect(page.locator(".inspector-loading")).toHaveCount(0);
+  const notice = page.locator(".image-load-status");
+  await expect(notice).toContainText("高清图加载中");
+  const noticeBox = (await notice.boundingBox())!;
+  const canvasBox = (await page.locator(".inspector-canvas").boundingBox())!;
+  expect(
+    Math.abs(
+      noticeBox.x + noticeBox.width / 2 - canvasBox.x - canvasBox.width / 2,
+    ),
+  ).toBeLessThan(2);
+  expect(
+    await notice
+      .locator("strong")
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBeGreaterThanOrEqual(14);
+
   await expect(image).toBeVisible();
   expect(
     await image.evaluate((img: HTMLImageElement) => img.naturalWidth > 0),
@@ -156,6 +171,7 @@ test("slow image switches keep the workspace mounted and late loads cannot overw
   await expect(image).toHaveAttribute("data-resolution", "hd", {
     timeout: 20000,
   });
+  await expect(notice).toHaveCount(0);
   await page.waitForTimeout(1400);
   await expect(image).toHaveAttribute("data-figure-id", last.id);
   expect(

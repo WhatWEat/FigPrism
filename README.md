@@ -144,8 +144,11 @@ docker compose exec backend figprism pipeline status
 
 首页默认 Deck：每张卡片对应一篇论文，胶片条悬停即可切换主图、图号和配色，点击任意图进入检视器；卡片可原地展开为两列图表。Swimlane 按论文横排展示 210px 高图表，支持横向滚轮/拖拽及整组收藏。Flat 保留单图瀑布流。视图选择保存到 localStorage。
 
-`GET /api/figures/feed?group_by=paper` 先应用所有筛选条件，再在 SQL 层按论文分页（默认 16 组）；返回 `paper`、`hero_figure_id`、自然图号排序的 `matched_figures`。代表图优先级为 Pipeline / Framework、Teaser、Micro-Mechanism、实验图。`group_by=none` 按单图分页，旧 `/api/figures` 保持兼容。`GET /api/papers/{id}/figures` 提供完整同文导航；批量收藏接口检查看板所有者并保留已有笔记。
+`GET /api/figures/feed?group_by=paper` 先应用所有筛选条件，再在 SQL 层按论文分页（默认 16 组）；返回 `paper`、`hero_figure_id`、自然图号排序的 `matched_figures`。代表图优先级为 Pipeline / Framework、Teaser、Micro-Mechanism、实验图。`group_by=none` 按单图分页，旧 `/api/figures` 保持兼容。`GET /api/papers/{id}/figures` 支持同样的筛选参数，并返回匹配数和同文总数；不传筛选时仍返回全部。同文导航默认沿用进入弹窗时的筛选，可明确切换到同文全部图表；批量收藏接口检查看板所有者并保留已有笔记。
 
-护眼融合使用显示层 `mix-blend-mode: multiply` 和 `contrast(1.02)`，原始 WebP / PDF 文件、导出色值和离屏取色 canvas 都不变。图片装裱区固定使用暖纸底色，不再提供纸感或纯白背景切换，旧版关闭偏好也不会改变显示。
+护眼融合使用显示层 `mix-blend-mode: multiply` 和 `contrast(1.02)`，原始 WebP / PDF 文件、导出色值和离屏取色 canvas 都不变。图片装裱区固定使用暖灰褐色 `#E6E2DA`（与检视画布一致），不再提供纸感或纯白背景切换，旧版关闭偏好也不会改变显示。
 
 本次 v2.1 使用并行实例发布，旧 `figprism` 容器继续处理切换前已接受的任务；新流量进入 `figprism-v2`。`figprism-drain-legacy.timer` 每两分钟检查一次，确认没有在途/排队任务和附加计算进程后，才停止记录中的旧容器。它不会删除数据库、资产或容器日志。`data/.pipeline/recovery-exempt.json` 在此期间保护旧任务及批次子任务，避免新实例启动时将它们误标为失败；旧运行环境回收后自动移除。
+
+
+检视器切图会保留工作台和已显示图像，解码后的缩略预览与高清图逐级替换，相邻高清资源会提前缓存。缩略阶段暂不启用吸管；高清就绪后，从原始图像向离屏 1×1 canvas 采样，放大镜同样取原始图像区域，避免为每张超大图长期复制一整块像素画布。默认同文导航与 Feed 的方法/数据等筛选一致，全部模式会标注其他类型与未命中项。 高清加载提示位于画布上方正中，带较大字号和加载动画；超过约 150ms 才显示，快速缓存命中不会闪现提示。

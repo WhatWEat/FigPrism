@@ -85,6 +85,20 @@ export function Inspector({ ids }: { ids: string[] }) {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [cropping, setCropping] = useState(false);
+  const [showLoadingNotice, setShowLoadingNotice] = useState(false);
+  useEffect(() => {
+    if (!ui.selectedId || cropping || (picture.ready && !isSwitching)) {
+      setShowLoadingNotice(false);
+      return;
+    }
+    if (picture.error && !isSwitching) {
+      setShowLoadingNotice(true);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoadingNotice(true), 150);
+    return () => clearTimeout(timer);
+  }, [cropping, picture.ready, picture.error, isSwitching, ui.selectedId]);
+
   const [codeOpen, setCodeOpen] = useState(false);
   const img = picture.imageRef;
   const pixelCanvas = useRef<HTMLCanvasElement | null>(null);
@@ -190,7 +204,8 @@ export function Inspector({ ids }: { ids: string[] }) {
         e.preventDefault();
         setZoom((z) => (z === 1 ? 1.8 : 1));
       }
-      if (e.key.toLowerCase() === "i" && picture.ready) setPicker((v) => !v);
+      if (e.key.toLowerCase() === "i" && picture.ready && !cropping)
+        setPicker((v) => !v);
       if (e.key.toLowerCase() === "s" && f && !isSwitching) {
         e.preventDefault();
         if (user) void quickSave(f);
@@ -389,7 +404,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                     }}
                     title="吸管取色 (I)"
                     aria-label="吸管取色"
-                    disabled={!picture.ready}
+                    disabled={!picture.ready || cropping}
                   >
                     <Pipette size={16} />
                   </button>
@@ -412,6 +427,36 @@ export function Inspector({ ids }: { ids: string[] }) {
                   </button>
                 </div>
               </div>
+              {!cropping &&
+                showLoadingNotice &&
+                (!picture.ready || isSwitching) && (
+                  <div
+                    className="image-load-status"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {(!picture.error || isSwitching) && <Spinner />}
+                    <div>
+                      <strong>
+                        {isSwitching
+                          ? "正在读取图表"
+                          : picture.error
+                            ? "高清图暂时无法加载"
+                            : "高清图加载中"}
+                      </strong>
+                      <span>
+                        {isSwitching
+                          ? "正在准备下一张图片"
+                          : picture.visible?.id === f.id
+                            ? `${f.fig_label} · 当前显示预览`
+                            : `正在切换到 ${f.fig_label}`}
+                      </span>
+                    </div>
+                    {picture.error && !isSwitching && (
+                      <button onClick={picture.retry}>重试</button>
+                    )}
+                  </div>
+                )}
               {cropping ? (
                 <CropEditor
                   figure={f}
@@ -463,18 +508,6 @@ export function Inspector({ ids }: { ids: string[] }) {
                           />
                         )}
                       </div>
-                      {(!picture.ready || isSwitching) && (
-                        <div className="image-load-status" role="status">
-                          {picture.error
-                            ? "高清图暂不可用，保留预览"
-                            : isSwitching
-                              ? "正在读取图表…"
-                              : `正在加载 ${f.fig_label} 高清图…`}
-                          {picture.error && (
-                            <button onClick={picture.retry}>重试</button>
-                          )}
-                        </div>
-                      )}
                       {point && picker && picture.ready && (
                         <div
                           className="loupe"

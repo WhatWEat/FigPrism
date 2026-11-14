@@ -50,7 +50,7 @@ test("default paper deck scrubs colors, expands inline and navigates siblings", 
     page.getByRole("dialog").locator(".modal-heading h2"),
   ).toHaveText(`${target.fig_label} · 图表检视器`);
   const siblings = await (
-    await request.get(`/api/papers/${group.paper.id}/figures`)
+    await request.get(`/api/papers/${group.paper.id}/figures?show_cases=false`)
   ).json();
   await expect(page.locator(".sibling-track button")).toHaveCount(
     siblings.items.length,
@@ -143,6 +143,9 @@ test("fixed warm paper ignores old preferences and preserves original eyedropper
   ).toBe("rgb(237, 234, 228)");
   await page.locator(".deck-hero").first().click();
   const image = page.locator(".image-wrap img");
+  await expect(image).toHaveAttribute("data-resolution", "hd", {
+    timeout: 20000,
+  });
   await expect
     .poll(() =>
       image.evaluate(
@@ -207,7 +210,7 @@ test("fixed warm paper ignores old preferences and preserves original eyedropper
     await page
       .locator(".image-wrap")
       .evaluate((el) => getComputedStyle(el).backgroundColor),
-  ).toBe("rgb(250, 248, 245)");
+  ).toBe("rgb(230, 226, 218)");
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(

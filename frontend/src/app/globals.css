@@ -6,7 +6,7 @@
   --bg-subtle: #e3dfd7;
   --bg-subtle-hover: #d8d3c8;
   --bg-drafting: #e6e2da;
-  --bg-figure-mat: #faf8f5;
+  --bg-figure-mat: var(--bg-drafting);
   --border-hairline: #d6d1c7;
   --border-strong: #b8b1a4;
   --text-primary: #181615;
@@ -3528,4 +3528,98 @@ button:disabled {
   color: var(--text-tertiary);
   background: var(--bg-subtle);
   border-color: var(--border-hairline);
+}
+.image-load-status {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 10px 17px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-surface);
+  box-shadow: 0 5px 18px rgba(24, 22, 21, 0.14);
+  color: var(--text-primary);
+  pointer-events: auto;
+}
+.image-load-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+}
+.image-load-status strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.image-load-status span {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.image-load-status .spin {
+  flex-shrink: 0;
+  color: var(--accent-brand);
+}
+.image-load-status button {
+  text-decoration: underline;
+  color: var(--accent-brand);
+}
+.inspector-classification {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 13px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.inspector-classification strong {
+  font-weight: 500;
+  padding: 4px 7px;
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+.inspector-classification .outside-filter {
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.sibling-label {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.sibling-scope-toggle {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent-brand);
+}
+.sibling-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.sibling-meta strong {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.sibling-meta small {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+.sibling-track button.outside-filter {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+}
+.sibling-track button.outside-filter.active {
+  border-color: var(--accent-ink);
 }
