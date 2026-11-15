@@ -24,6 +24,7 @@
 **FigPrism** 是一个专为 AI / ML 研究者打造的**「以科研图表为一等公民（Figure-First）」**审美与检索平台：自动从 `arXiv`、`Hugging Face Daily Papers`、`OpenReview`、`DBLP` 与 `CVF Open Access` 收集顶会论文，抽取出**高保真矢量切片与 450 DPI 超清图表**，通过视觉大模型完成**方法架构画风 × 空间拓扑骨架 × 局部巧思**与**实验图表排版**结构化拆解，并在感知均匀的 **OKLab / OKLCH** 空间提取「浅色填充 + 同色相深色描边」成对科研配色，支持一键导出 `Matplotlib` / `LaTeX xcolor` / `CSS`。
 
 > ✨ 无需登录即可直接浏览公开图库、三维精细筛选、像素级吸管取色、导出配色代码与下载矢量 PDF / TikZ 源码。
+> 🤖 本项目全栈由 **Gemini Carbon（产品设计与增量 PRD）× Codex（代码实现、容器发布与端到端回归）** 双 Agent 闭环协作打造。
 
 ---
 
@@ -69,6 +70,19 @@
 ### 6. 📌 私有灵感看板 (`Moodboard`) & 一键打包导出
 - 支持整篇论文批量收藏、单图/子图聚焦收藏与科研笔记记录，双轨记录浏览历史与取色历史。
 - 一键导出 `figprism-moodboard.zip`，内含看板中全部图表的**高清 WebP、原生矢量 `.pdf`、`palettes.py`、`palettes.tex` 与 `notes.json`**。
+
+---
+
+## 🤖 AI-Native 研发闭环：Gemini Carbon (PRD) × Codex (实现)
+
+FigPrism 全栈采用 **「唯一主 PRD + 编号增量规格单」** 的双 Agent 协同研发范式（详见 [AGENTS.md](AGENTS.md) 与 [docs/specs/_template.md](docs/specs/_template.md)）：
+
+1. **立项写小单（Gemini Carbon 负责 PRD 与审美规格）**：
+   每次迭代由 **Gemini Carbon** 进行产品设计、视觉审美拆解与边界推演，基于模板生成 50~150 行的独立增量开发单 `docs/specs/00X-<slug>.md`（明确数据库 Delta、API 契约、VLM Prompt 与 UI 交互验收标准），不直接手改长篇主文档。
+2. **精准按单实现（Codex 负责代码落地与自动化验证）**：
+   **Codex** 读取 [AGENTS.md](AGENTS.md) 全局红线与 [docs/PRD.md](docs/PRD.md) 基线，严格限定在目标 `00X` 规格单范围内完成前后端编码、容器构建、存量数据回填，并跑通 `pytest` + `tsc` + `Playwright E2E` 全链路验证。
+3. **验收后自动合入主 PRD（文档零腐化闭环）**：
+   线上验收通过后，由 **Codex** 将最终落地的表结构、API 与交互规则原地合入 [docs/PRD.md](docs/PRD.md)（直接替换旧描述，拒绝末尾堆叠补丁），并将规格单标记为 `Status: Merged`，让 `docs/PRD.md` 始终保持为干净、无冲突的唯一全局真相源。
 
 ---
 
