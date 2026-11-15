@@ -29,12 +29,23 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { api, post, put, paletteCode, rgb } from "@/lib/api";
-import { Figure, Board, archetypes, archetypeNames } from "@/lib/types";
+import {
+  Figure,
+  Board,
+  figureTypeLabel,
+  methodSubTypes,
+  methodStyles,
+  methodTopologies,
+  methodCrafts,
+  dataChartTypes,
+  dataChartLayouts,
+} from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { Modal, Spinner, ErrorMessage, useUser, copyColor } from "./ui";
 import { quickSave } from "./figure-card";
 import { SiblingFigures } from "./paper-groups";
 import { useInspectorImage } from "@/lib/use-inspector-image";
+import { warmFigureImage } from "@/lib/decoded-image-cache";
 
 import { useInspectorViewport } from "@/lib/use-inspector-viewport";
 import { ZoomRail } from "./zoom-rail";
@@ -104,7 +115,29 @@ export function Inspector({ ids }: { ids: string[] }) {
   }, [cropping, picture.ready, picture.error, isSwitching, ui.selectedId]);
 
   const [codeOpen, setCodeOpen] = useState(false);
-  const {zoom,zoomRef,applyZoom,resetZoom,stageRef,attachScroll,stageWidthPx} = useInspectorViewport(f?.width && f?.height ? f.width / f.height : f?.aspect_ratio || 1.4,ui.selectedId,!cropping);
+  const [isPanning, setIsPanning] = useState(false);
+  const {
+    zoom,
+    zoomRef,
+    applyZoom,
+    resetZoom,
+    scrollRef,
+    stageRef,
+    attachScroll,
+    stageWidthPx,
+  } = useInspectorViewport(
+    f?.width && f?.height ? f.width / f.height : f?.aspect_ratio || 1.4,
+    ui.selectedId,
+    !cropping,
+  );
+  const panStateRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+    pointerId: number;
+    moved: boolean;
+  } | null>(null);
   const img = picture.imageRef;
   const pixelCanvas = useRef<HTMLCanvasElement | null>(null);
   const loupe = useRef<HTMLCanvasElement>(null);
@@ -133,6 +166,7 @@ export function Inspector({ ids }: { ids: string[] }) {
     if (ui.selectedId && user)
       void post(`/figures/${ui.selectedId}/view`).catch(() => {});
   }, [ui.selectedId, ui.selectedContext, user?.id]);
+
   const selectInInspector = useCallback(
     (id: string) => {
       if (id === ui.selectedId) return;
@@ -168,14 +202,11 @@ export function Inspector({ ids }: { ids: string[] }) {
   );
   useEffect(() => {
     const index = siblings.findIndex((item) => item.id === f?.id);
-    const next = siblings[index + 1] || siblings[index - 1];
-    if (!next || !ui.selectedId) return;
-    const abort = new AbortController();
-    fetch(next.hd_url, { signal: abort.signal, cache: "force-cache" })
-      .then((response) => (response.ok ? response.arrayBuffer() : undefined))
-      .catch(() => {});
-    return () => abort.abort();
-  }, [f?.id, siblings, ui.selectedId]);
+    if (!ui.selectedId || !picture.ready) return;
+    for (const next of [siblings[index + 1], siblings[index - 1]]) {
+      if (next) warmFigureImage(next);
+    }
+  }, [f?.id, siblings, ui.selectedId, picture.ready]);
   function toggleScope() {
     if (showAll && f && !matchedIds.has(f.id) && matched[0])
       selectInInspector(matched[0].id);
@@ -206,7 +237,7 @@ export function Inspector({ ids }: { ids: string[] }) {
       }
       if (e.code === "Space") {
         e.preventDefault();
-        applyZoom(zoomRef.current === 1 ? 1.8 : 1);
+        applyZoom(zoomRef.current === 1 ? 1.85 : 1);
       }
       if (e.key.toLowerCase() === "i" && picture.ready && !cropping)
         setPicker((v) => !v);
@@ -359,12 +390,20 @@ export function Inspector({ ids }: { ids: string[] }) {
   const palette = focused?.palette || f?.palette;
   const colors = palette?.colors.map((c) => c.hex) || [];
   const exportText = paletteCode(colors, format);
-  const sidebar = useMemo(() => f ? (
-            <aside
-              className="inspector-sidebar"
-              aria-busy={isSwitching}
-            >
-              {isSwitching ? <div className="detail-loading" role="status"><Spinner/><strong>正在加载当前图表详情</strong><div className="detail-skeleton"/><div className="detail-skeleton"/></div> : <>
+  const canPan = !picker && !cropping && zoom > 1.01;
+  const sidebar = useMemo(
+    () =>
+      f ? (
+        <aside className="inspector-sidebar" aria-busy={isSwitching}>
+          {isSwitching ? (
+            <div className="detail-loading" role="status">
+              <Spinner />
+              <strong>正在加载当前图表详情</strong>
+              <div className="detail-skeleton" />
+              <div className="detail-skeleton" />
+            </div>
+          ) : (
+            <>
               <div className="paper-heading">
                 <div className="eyebrow">
                   THE PAPER{" "}
@@ -376,7 +415,45 @@ export function Inspector({ ids }: { ids: string[] }) {
                   )}
                 </div>
                 <div className="inspector-classification">
-                  <strong>{archetypeNames[f.archetype] || f.archetype}</strong>
+                  <strong>{figureTypeLabel(f)}</strong>
+                  {f.primary_style && (
+                    <span className="taxonomy-pill style-pill">
+                      {methodStyles.find((x) => x.key === f.primary_style)
+                        ?.label || f.primary_style}
+                    </span>
+                  )}
+                  {f.secondary_style && (
+                    <span className="taxonomy-pill subtle-pill">
+                      {methodStyles.find((x) => x.key === f.secondary_style)
+                        ?.short || f.secondary_style}
+                    </span>
+                  )}
+                  {f.layout_topology && (
+                    <span className="taxonomy-pill topo-pill">
+                      {methodTopologies.find((x) => x.key === f.layout_topology)
+                        ?.label || f.layout_topology}
+                    </span>
+                  )}
+                  {f.chart_layout && (
+                    <span className="taxonomy-pill layout-pill">
+                      {dataChartLayouts.find((x) => x.key === f.chart_layout)
+                        ?.label || f.chart_layout}
+                    </span>
+                  )}
+                  {(f.craft_badges || []).map((badge) => (
+                    <span key={badge} className="taxonomy-pill craft-pill">
+                      {methodCrafts.find((x) => x.key === badge)?.label ||
+                        badge}
+                    </span>
+                  ))}
+                  {f.taxonomy_locked === 1 && (
+                    <span
+                      className="taxonomy-pill locked-pill"
+                      title="人工修改分类已锁定，批量刷新自动跳过"
+                    >
+                      已锁定
+                    </span>
+                  )}
                   {feedQuery && siblingQuery.data && (
                     <span
                       className={
@@ -432,7 +509,10 @@ export function Inspector({ ids }: { ids: string[] }) {
                   </button>
                 </div>
                 <p className={`caption-text ${serif ? "serif" : ""}`}>
-                  <RichCaption text={focused?.caption || f.caption || "暂无图注"} onFocus={setFocus}/>
+                  <RichCaption
+                    text={focused?.caption || f.caption || "暂无图注"}
+                    onFocus={setFocus}
+                  />
                 </p>
                 {f.review_status !== "ok" && (
                   <p className="review-note">
@@ -623,36 +703,175 @@ export function Inspector({ ids }: { ids: string[] }) {
                   </>
                 )}
                 {user && (
-                  <label className="type-editor">
-                    图表分类
-                    <select
-                      value={f.archetype}
-                      onChange={async (e) => {
-                        try {
-                          await api(`/figures/${f.id}`, {
-                            method: "PATCH",
-                            body: JSON.stringify({
-                              archetype: e.target.value,
-                              sub_tags: f.sub_tags,
-                            }),
-                          });
-                          cache.invalidateQueries({
-                            queryKey: ["figure", f.id],
-                          });
-                          cache.invalidateQueries({ queryKey: ["figures"] });
-                          cache.invalidateQueries({ queryKey: ["siblings"] });
-                        } catch (e) {
-                          ui.notify((e as Error).message);
-                        }
-                      }}
-                    >
-                      {archetypes.map((a) => (
-                        <option key={a} value={a}>
-                          {archetypeNames[a]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="taxonomy-editor">
+                    <label className="type-editor">
+                      <span>
+                        图表分类{" "}
+                        {f.taxonomy_locked === 1 ? "（已人工锁定）" : ""}
+                      </span>
+                      <select
+                        aria-label="图表分类"
+                        value={f.sub_type || "system_pipeline"}
+                        onChange={async (e) => {
+                          const nextSub = e.target.value;
+                          const nextMacro = methodSubTypes.some(
+                            (m) => m.key === nextSub,
+                          )
+                            ? "method"
+                            : dataChartTypes.some((d) => d.key === nextSub)
+                              ? "data_chart"
+                              : "case_study";
+                          try {
+                            await api(`/figures/${f.id}`, {
+                              method: "PATCH",
+                              body: JSON.stringify({
+                                macro_category: nextMacro,
+                                sub_type: nextSub,
+                                sub_tags: f.sub_tags,
+                              }),
+                            });
+                            cache.invalidateQueries({
+                              queryKey: ["figure", f.id],
+                            });
+                            cache.invalidateQueries({ queryKey: ["figures"] });
+                            cache.invalidateQueries({ queryKey: ["siblings"] });
+                            ui.notify("分类已更新并锁定");
+                          } catch (err) {
+                            ui.notify((err as Error).message);
+                          }
+                        }}
+                      >
+                        <optgroup label="方法架构图">
+                          {methodSubTypes.map((m) => (
+                            <option key={m.key} value={m.key}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="数据实验图">
+                          {dataChartTypes.map((d) => (
+                            <option key={d.key} value={d.key}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="定性展示">
+                          <option value="qualitative_case">定性案例</option>
+                        </optgroup>
+                      </select>
+                    </label>
+                    {f.macro_category === "method" && (
+                      <div className="taxonomy-editor-row">
+                        <label className="type-editor compact">
+                          <span>画风质感</span>
+                          <select
+                            aria-label="画风质感"
+                            value={f.primary_style || ""}
+                            onChange={async (e) => {
+                              try {
+                                await api(`/figures/${f.id}`, {
+                                  method: "PATCH",
+                                  body: JSON.stringify({
+                                    primary_style: e.target.value || null,
+                                  }),
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["figure", f.id],
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["figures"],
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["siblings"],
+                                });
+                              } catch (err) {
+                                ui.notify((err as Error).message);
+                              }
+                            }}
+                          >
+                            <option value="">未指定画风</option>
+                            {methodStyles.map((s) => (
+                              <option key={s.key} value={s.key}>
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="type-editor compact">
+                          <span>构图骨架</span>
+                          <select
+                            aria-label="构图骨架"
+                            value={f.layout_topology || ""}
+                            onChange={async (e) => {
+                              try {
+                                await api(`/figures/${f.id}`, {
+                                  method: "PATCH",
+                                  body: JSON.stringify({
+                                    layout_topology: e.target.value || null,
+                                  }),
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["figure", f.id],
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["figures"],
+                                });
+                                cache.invalidateQueries({
+                                  queryKey: ["siblings"],
+                                });
+                              } catch (err) {
+                                ui.notify((err as Error).message);
+                              }
+                            }}
+                          >
+                            <option value="">未指定骨架</option>
+                            {methodTopologies.map((t) => (
+                              <option key={t.key} value={t.key}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                    {f.macro_category === "data_chart" && (
+                      <label className="type-editor compact">
+                        <span>实验排版形态</span>
+                        <select
+                          aria-label="实验排版形态"
+                          value={f.chart_layout || ""}
+                          onChange={async (e) => {
+                            try {
+                              await api(`/figures/${f.id}`, {
+                                method: "PATCH",
+                                body: JSON.stringify({
+                                  chart_layout: e.target.value || null,
+                                }),
+                              });
+                              cache.invalidateQueries({
+                                queryKey: ["figure", f.id],
+                              });
+                              cache.invalidateQueries({
+                                queryKey: ["figures"],
+                              });
+                              cache.invalidateQueries({
+                                queryKey: ["siblings"],
+                              });
+                            } catch (err) {
+                              ui.notify((err as Error).message);
+                            }
+                          }}
+                        >
+                          <option value="">未指定排版</option>
+                          {dataChartLayouts.map((l) => (
+                            <option key={l.key} value={l.key}>
+                              {l.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
                 )}
               </section>
               <section className="panel-section save-panel">
@@ -699,9 +918,29 @@ export function Inspector({ ids }: { ids: string[] }) {
                   {user ? "保存至看板" : "登录并收藏"}
                 </button>
               </section>
-              </>}
-            </aside>
-  ) : null, [f,isSwitching,user,focus,serif,format,board,note,saving,codeOpen,boards,feedQuery,feedLabel,siblingQuery.data,ui,cache]);
+            </>
+          )}
+        </aside>
+      ) : null,
+    [
+      f,
+      isSwitching,
+      user,
+      focus,
+      serif,
+      format,
+      board,
+      note,
+      saving,
+      codeOpen,
+      boards,
+      feedQuery,
+      feedLabel,
+      siblingQuery.data,
+      ui,
+      cache,
+    ],
+  );
   return (
     <Modal
       open={!!ui.selectedId}
@@ -769,7 +1008,11 @@ export function Inspector({ ids }: { ids: string[] }) {
                   >
                     <Plus size={15} />
                   </button>
-                  <button onClick={resetZoom} title="适应窗口" aria-label="适应窗口">
+                  <button
+                    onClick={resetZoom}
+                    title="适应窗口"
+                    aria-label="适应窗口"
+                  >
                     <Focus size={16} />
                   </button>
                 </div>
@@ -817,24 +1060,91 @@ export function Inspector({ ids }: { ids: string[] }) {
                 />
               ) : (
                 <>
-                  <ZoomRail zoom={zoom} onZoom={applyZoom} onFit={resetZoom}/>
-                  <div ref={attachScroll} className="canvas-scroll">
+                  <ZoomRail zoom={zoom} onZoom={applyZoom} onFit={resetZoom} />
+                  <div
+                    ref={attachScroll}
+                    className={`canvas-scroll ${canPan ? "pannable" : ""} ${isPanning ? "panning" : ""}`}
+                    onPointerDown={(e) => {
+                      if (!canPan || e.button !== 0 || !scrollRef.current)
+                        return;
+                      if ((e.target as HTMLElement).closest("button")) return;
+                      panStateRef.current = {
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        scrollLeft: scrollRef.current.scrollLeft,
+                        scrollTop: scrollRef.current.scrollTop,
+                        pointerId: e.pointerId,
+                        moved: false,
+                      };
+                    }}
+                    onPointerMove={(e) => {
+                      const st = panStateRef.current;
+                      const el = scrollRef.current;
+                      if (!st || !el) return;
+                      const dx = e.clientX - st.startX;
+                      const dy = e.clientY - st.startY;
+                      if (!st.moved && Math.hypot(dx, dy) > 4) {
+                        st.moved = true;
+                        setIsPanning(true);
+                        el.setPointerCapture(st.pointerId);
+                      }
+                      if (st.moved) {
+                        e.preventDefault();
+                        el.scrollLeft = st.scrollLeft - dx;
+                        el.scrollTop = st.scrollTop - dy;
+                      }
+                    }}
+                    onPointerUp={() => {
+                      const st = panStateRef.current;
+                      const el = scrollRef.current;
+                      if (st && el && el.hasPointerCapture(st.pointerId)) {
+                        el.releasePointerCapture(st.pointerId);
+                      }
+                      panStateRef.current = null;
+                      setIsPanning(false);
+                    }}
+                    onPointerCancel={() => {
+                      const st = panStateRef.current;
+                      const el = scrollRef.current;
+                      if (st && el && el.hasPointerCapture(st.pointerId)) {
+                        el.releasePointerCapture(st.pointerId);
+                      }
+                      panStateRef.current = null;
+                      setIsPanning(false);
+                    }}
+                  >
                     <div
                       ref={stageRef}
                       className={`image-stage ${picker ? "picking" : ""}`}
                       onPointerMove={move}
                       onPointerLeave={() => setPoint(null)}
+                      onDoubleClick={(e) => {
+                        if (picker || cropping) return;
+                        applyZoom(zoom < 1.5 ? 2 : 1, e.clientX, e.clientY);
+                      }}
                       onClick={() => {
                         if (picker && point && picture.ready)
                           void copyColor(point.hex, f.id, user);
                       }}
-                      style={stageWidthPx ? {width:`${stageWidthPx}px`} : {maxWidth:"100%",maxHeight:"100%"}}
+                      style={
+                        stageWidthPx
+                          ? { width: `${stageWidthPx}px` }
+                          : { maxWidth: "100%", maxHeight: "100%" }
+                      }
                     >
-                      <div className="image-wrap" style={{aspectRatio:f.width && f.height ? f.width / f.height : f.aspect_ratio || 1.4}}>
+                      <div
+                        className="image-wrap"
+                        style={{
+                          aspectRatio:
+                            f.width && f.height
+                              ? f.width / f.height
+                              : f.aspect_ratio || 1.4,
+                        }}
+                      >
                         <img
                           ref={img}
                           className="fig-paper-blend"
-                          style={{height:"100%",objectFit:"contain"}}
+                          style={{ height: "100%", objectFit: "contain" }}
                           src={picture.visible?.src || f.thumb_url}
                           alt={picture.visible?.alt || f.title}
                           data-figure-id={picture.visible?.id || f.id}
@@ -913,9 +1223,10 @@ export function Inspector({ ids }: { ids: string[] }) {
                   />
                   <div className="canvas-bottom">
                     <span>
+                      <span className="keycap">滚轮</span> 缩放{" "}
+                      <span className="keycap">拖拽</span> 平移{" "}
                       <span className="keycap">I</span> 取色{" "}
-                      <span className="keycap">← →</span> 切图{" "}
-                      <span className="keycap">Space</span> 缩放
+                      <span className="keycap">← →</span> 切图
                     </span>
                     {user && (
                       <div>

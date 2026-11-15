@@ -482,6 +482,63 @@ type AdminInfo = {
   vision_driver: string;
   vision_model: string;
 };
+type StorageStats = {
+  used_bytes: number;
+  limit_bytes: number;
+  favorite_used_bytes: number;
+  favorite_limit_bytes: number;
+  normal_used_bytes?: number;
+  normal_limit_bytes: number;
+};
+function cacheBytes(bytes: number) {
+  const [divisor, unit] =
+    bytes >= 1e9
+      ? [1e9, "GB"]
+      : bytes >= 1e6
+        ? [1e6, "MB"]
+        : bytes >= 1e3
+          ? [1e3, "KB"]
+          : [1, "B"];
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(bytes / divisor)} ${unit}`;
+}
+function CachePool({
+  name,
+  used,
+  limit,
+  description,
+}: {
+  name: string;
+  used: number;
+  limit: number;
+  description: string;
+}) {
+  const percent = limit > 0 ? Math.max(0, (used / limit) * 100) : 0;
+  const percentage =
+    percent > 0 && percent < 0.1
+      ? "<0.1"
+      : new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(
+          percent,
+        );
+  return (
+    <div className="cache-pool" role="group" aria-label={name}>
+      <div className="cache-pool-heading">
+        <strong>{name}</strong>
+        <span>{percentage}%</span>
+      </div>
+      <progress
+        className="cache-meter"
+        aria-label={`${name}占用率`}
+        aria-valuetext={`${percentage}%，已用 ${cacheBytes(used)}，容量 ${cacheBytes(limit)}`}
+        value={Math.min(100, percent)}
+        max={100}
+      />
+      <div className="cache-pool-bytes">
+        {cacheBytes(used)} <span>/ {cacheBytes(limit)}</span>
+      </div>
+      <p>{description}</p>
+    </div>
+  );
+}
 const stageLabels: Record<string, string> = {
   metadata: "元数据查询",
   download: "论文下载",
@@ -510,9 +567,10 @@ export function AdminPage() {
   const stages = useQuery({
     queryKey: ["pipeline"],
     queryFn: () =>
-      api<{ stages: Record<string, { limit: number; active: number }> }>(
-        "/admin/pipeline",
-      ),
+      api<{
+        stages: Record<string, { limit: number; active: number }>;
+        storage?: StorageStats;
+      }>("/admin/pipeline"),
     enabled: user?.role === "admin",
     refetchInterval: 3000,
   });
@@ -554,6 +612,57 @@ export function AdminPage() {
       <ErrorMessage error={result.error} />
       {result.data && (
         <div className="admin-grid">
+          <section className="admin-card cache-panel" aria-label="本地缓存用量">
+            <div className="cache-heading">
+              <h2>
+                <Database size={18} />
+                本地缓存
+              </h2>
+              {stages.data?.storage && (
+                <span>
+                  合计 {cacheBytes(stages.data.storage.used_bytes)} /{" "}
+                  {cacheBytes(stages.data.storage.limit_bytes)}
+                </span>
+              )}
+            </div>
+            <ErrorMessage error={stages.error} />
+            {stages.data?.storage ? (
+              <>
+                <div className="cache-pools">
+                  <CachePool
+                    name="普通缓存"
+                    used={
+                      stages.data.storage.normal_used_bytes ??
+                      Math.max(
+                        0,
+                        stages.data.storage.used_bytes -
+                          stages.data.storage.favorite_used_bytes,
+                      )
+                    }
+                    limit={stages.data.storage.normal_limit_bytes}
+                    description="图表、原文及待上传文件"
+                  />
+                  <CachePool
+                    name="收藏缓存"
+                    used={stages.data.storage.favorite_used_bytes}
+                    limit={stages.data.storage.favorite_limit_bytes}
+                    description="收藏图表的高清图与缩略图"
+                  />
+                </div>
+                <p className="cache-note">
+                  每 3 秒更新 · 缓存保留至需要空间时再按 LRU
+                  替换，未备份文件不会被清理。
+                </p>
+              </>
+            ) : stages.isPending ? (
+              <p className="cache-loading">
+                <Spinner />
+                正在读取缓存用量…
+              </p>
+            ) : !stages.error ? (
+              <p>暂时无法读取缓存用量。</p>
+            ) : null}
+          </section>
           <section className="admin-card">
             <h2>
               <RefreshCw size={18} />

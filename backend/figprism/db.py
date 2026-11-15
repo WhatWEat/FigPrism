@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS figures (
  blurhash TEXT, fonts TEXT DEFAULT '[]', palette TEXT NOT NULL, color_buckets TEXT DEFAULT '[]',
  subitems TEXT DEFAULT '[]', tikz_code TEXT, extract_method TEXT DEFAULT 'pdf_snap_crop',
  sub_tags TEXT DEFAULT '[]', confidence REAL DEFAULT 0, review_status TEXT DEFAULT 'needs_review',
+ macro_category TEXT, sub_type TEXT, primary_style TEXT, secondary_style TEXT,
+ layout_topology TEXT, craft_badges_json TEXT DEFAULT '[]', chart_layout TEXT,
+ style_confidence REAL, style_reason TEXT, taxonomy_locked INTEGER DEFAULT 0,
  asset_base TEXT NOT NULL, version_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS figures_paper_idx ON figures(paper_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS figures_fts USING fts5(figure_id UNINDEXED, title, caption, fonts);
@@ -41,6 +44,75 @@ CREATE TABLE IF NOT EXISTS palette_history (id INTEGER PRIMARY KEY, user_id INTE
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, user_id INTEGER REFERENCES users(id), kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', progress INTEGER DEFAULT 0, message TEXT DEFAULT '', payload TEXT DEFAULT '{}', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS repair_queue (id TEXT PRIMARY KEY, figure_id TEXT NOT NULL REFERENCES figures(id), requested_by INTEGER REFERENCES users(id), status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS asset_transfers (
+ key TEXT PRIMARY KEY, digest TEXT NOT NULL, size INTEGER NOT NULL,
+ content_type TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0,
+ attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS asset_transfers_pending ON asset_transfers(synced,next_attempt);
+"""
+
+TAXONOMY_COLUMNS = (
+    ("sub_tags", "TEXT DEFAULT '[]'"),
+    ("macro_category", "TEXT"),
+    ("sub_type", "TEXT"),
+    ("primary_style", "TEXT"),
+    ("secondary_style", "TEXT"),
+    ("layout_topology", "TEXT"),
+    ("craft_badges_json", "TEXT DEFAULT '[]'"),
+    ("chart_layout", "TEXT"),
+    ("style_confidence", "REAL"),
+    ("style_reason", "TEXT"),
+    ("taxonomy_locked", "INTEGER DEFAULT 0"),
+)
+
+TAXONOMY_POST_MIGRATION = """
+CREATE INDEX IF NOT EXISTS idx_figures_macro_subtype ON figures(macro_category, sub_type);
+CREATE INDEX IF NOT EXISTS idx_figures_method_style ON figures(macro_category, primary_style, layout_topology);
+CREATE INDEX IF NOT EXISTS idx_figures_chart_layout ON figures(macro_category, chart_layout);
+UPDATE figures SET
+ macro_category = CASE
+  WHEN archetype IN ('Teaser','Motivation','Pipeline','Framework','Micro-Mechanism') THEN 'method'
+  WHEN archetype IN ('Curve','Bar','Scatter/Radar','Heatmap') THEN 'data_chart'
+  WHEN archetype = 'Case Study' THEN 'case_study'
+  ELSE 'method' END,
+ sub_type = CASE
+  WHEN archetype IN ('Teaser','Motivation') THEN 'concept_teaser'
+  WHEN archetype IN ('Pipeline','Framework') THEN 'system_pipeline'
+  WHEN archetype = 'Micro-Mechanism' THEN 'micro_mechanism'
+  WHEN archetype = 'Curve' THEN 'line_scaling'
+  WHEN archetype = 'Bar' THEN 'bar_ablation'
+  WHEN archetype = 'Scatter/Radar' THEN 'scatter_pareto'
+  WHEN archetype = 'Heatmap' THEN 'heatmap_matrix'
+  WHEN archetype = 'Case Study' THEN 'qualitative_case'
+  ELSE 'system_pipeline' END,
+ craft_badges_json = COALESCE(craft_badges_json, '[]'),
+ taxonomy_locked = COALESCE(taxonomy_locked, 0)
+WHERE macro_category IS NULL OR sub_type IS NULL;
+CREATE TRIGGER IF NOT EXISTS figure_taxonomy_defaults
+AFTER INSERT ON figures
+WHEN NEW.macro_category IS NULL OR NEW.sub_type IS NULL
+BEGIN
+ UPDATE figures SET
+  macro_category = COALESCE(NEW.macro_category, CASE
+   WHEN NEW.archetype IN ('Teaser','Motivation','Pipeline','Framework','Micro-Mechanism') THEN 'method'
+   WHEN NEW.archetype IN ('Curve','Bar','Scatter/Radar','Heatmap') THEN 'data_chart'
+   WHEN NEW.archetype = 'Case Study' THEN 'case_study'
+   ELSE 'method' END),
+  sub_type = COALESCE(NEW.sub_type, CASE
+   WHEN NEW.archetype IN ('Teaser','Motivation') THEN 'concept_teaser'
+   WHEN NEW.archetype IN ('Pipeline','Framework') THEN 'system_pipeline'
+   WHEN NEW.archetype = 'Micro-Mechanism' THEN 'micro_mechanism'
+   WHEN NEW.archetype = 'Curve' THEN 'line_scaling'
+   WHEN NEW.archetype = 'Bar' THEN 'bar_ablation'
+   WHEN NEW.archetype = 'Scatter/Radar' THEN 'scatter_pareto'
+   WHEN NEW.archetype = 'Heatmap' THEN 'heatmap_matrix'
+   WHEN NEW.archetype = 'Case Study' THEN 'qualitative_case'
+   ELSE 'system_pipeline' END),
+  craft_badges_json = COALESCE(NEW.craft_badges_json, '[]'),
+  taxonomy_locked = COALESCE(NEW.taxonomy_locked, 0)
+ WHERE id = NEW.id;
+END;
 """
 
 
@@ -65,8 +137,10 @@ def init_db(recover_jobs=False, preserve_job_ids=()):
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
         columns = {r[1] for r in db.execute("PRAGMA table_info(figures)")}
-        if "sub_tags" not in columns:
-            db.execute("ALTER TABLE figures ADD COLUMN sub_tags TEXT DEFAULT '[]'")
+        for col_name, col_def in TAXONOMY_COLUMNS:
+            if col_name not in columns:
+                db.execute(f"ALTER TABLE figures ADD COLUMN {col_name} {col_def}")
+        db.executescript(TAXONOMY_POST_MIGRATION)
         pcolumns = {r[1] for r in db.execute("PRAGMA table_info(papers)")}
         if "ingest_status" not in pcolumns:
             db.execute(

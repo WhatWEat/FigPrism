@@ -6,20 +6,29 @@ import uuid
 from pathlib import Path
 import tempfile
 from urllib.parse import urlparse, parse_qs
+import httpx
 from defusedxml import ElementTree as ET
 from .config import get_settings
 from .db import connect, event
 from .domains import match_domains, all_domains
 from .network import fetch
 from .storage import Storage
-from .vision import judge
+from .vision import judge, normalize_taxonomy
 from .concurrency import stage, resource_lock, bounded_map
 from .processing import cpu_call
 from .retry import error_message, root_error
 
 ARXIV_RE = r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?"
 PAPER_JSON = ("authors", "source_urls", "domains")
-FIGURE_JSON = ("bbox", "fonts", "palette", "color_buckets", "subitems", "sub_tags")
+FIGURE_JSON = (
+    "bbox",
+    "fonts",
+    "palette",
+    "color_buckets",
+    "subitems",
+    "sub_tags",
+    "craft_badges_json",
+)
 
 
 def update_job(jid, progress, message, status="running"):
@@ -175,6 +184,7 @@ async def persist_crop(
     storage,
     figure_id=None,
     publication_barrier=None,
+    taxonomy_locked=0,
 ):
     fid = (
         figure_id
@@ -189,7 +199,9 @@ async def persist_crop(
         sub = dict(sub)
         raw = sub.pop("raw", None)
         if raw:
-            sub["raw_path"] = asset + "_sub_" + sub["id"] + "_raw.pdf"
+            label = sub["id"]
+            safe_label = label if re.fullmatch(r"[A-Za-z0-9_-]+", label) else hashlib.sha256(label.encode()).hexdigest()[:16]
+            sub["raw_path"] = asset + "_sub_" + safe_label + "_raw.pdf"
             await storage.put(sub["raw_path"], raw, "application/pdf")
         subitems.append(sub)
     async with asyncio.TaskGroup() as uploads:
@@ -222,6 +234,20 @@ async def persist_crop(
         )
         else "Pipeline"
     )
+    tax = (
+        normalize_taxonomy(
+            macro_category=verdict.macro_category,
+            sub_type=verdict.sub_type,
+            archetype=verdict.archetype,
+            primary_style=verdict.primary_style,
+            secondary_style=verdict.secondary_style,
+            layout_topology=verdict.layout_topology,
+            craft_badges=verdict.craft_badges,
+            chart_layout=verdict.chart_layout,
+        )
+        if verdict
+        else normalize_taxonomy(archetype=fallback)
+    )
     row = {
         "id": fid,
         "paper_id": paper_id,
@@ -229,7 +255,17 @@ async def persist_crop(
         "page_number": crop.page,
         "bbox": crop.bbox,
         "caption": crop.caption,
-        "archetype": verdict.archetype if verdict else fallback,
+        "archetype": tax["archetype"],
+        "macro_category": tax["macro_category"],
+        "sub_type": tax["sub_type"],
+        "primary_style": tax["primary_style"],
+        "secondary_style": tax["secondary_style"],
+        "layout_topology": tax["layout_topology"],
+        "craft_badges_json": tax["craft_badges"],
+        "chart_layout": tax["chart_layout"],
+        "style_confidence": verdict.style_confidence if verdict else None,
+        "style_reason": verdict.style_reason if verdict else None,
+        "taxonomy_locked": int(bool(taxonomy_locked)),
         "span_type": "full" if (crop.bbox[2] - crop.bbox[0]) > 360 else "column",
         "width": rendered["width"],
         "height": rendered["height"],
@@ -396,11 +432,6 @@ async def ingest_pdf(
                             await storage.put(
                                 base + "/paper.pdf", data, "application/pdf"
                             )
-                            with connect() as db:
-                                db.execute(
-                                    "UPDATE papers SET pdf_uploaded=1 WHERE id=?",
-                                    (pid,),
-                                )
 
                     async def plan():
                         source = source_data
@@ -418,8 +449,8 @@ async def ingest_pdf(
                             Path(source_path).write_bytes(source)
                         return await cpu_call("plan", pdf, source_path=source_path)
 
-                    # PDF transfer and layout work overlap. No figure is published until its
-                    # original PDF and every figure asset are durable on WebDAV.
+                    # Local PDF staging and layout overlap. Publish only after the
+                    # original and all figure assets are durable in the local queue.
                     async with asyncio.TaskGroup() as group:
                         original = group.create_task(store_pdf())
                         planned = group.create_task(plan())
@@ -509,7 +540,7 @@ async def ingest_pdf(
                     update_job(
                         job_id,
                         100,
-                        f"完成 · {len(crops)} 张图表"
+                        f"完成 · {len(crops)} 张图表（远端备份由后台队列处理）"
                         + (
                             "；部分视觉判图不可用，已加入复核队列"
                             if counts["review_fallbacks"]
@@ -595,11 +626,20 @@ async def recrop(fid, page_number, bbox, do_snap=True):
         from .vision import Verdict
 
         verdict = Verdict(
+            macro_category=row["macro_category"],
+            sub_type=row["sub_type"],
             archetype=row["archetype"],
+            primary_style=row["primary_style"],
+            secondary_style=row["secondary_style"],
+            layout_topology=row["layout_topology"],
+            craft_badges=json.loads(row["craft_badges_json"] or "[]"),
+            chart_layout=row["chart_layout"],
             crop_ok=True,
             confidence=1,
+            style_confidence=row["style_confidence"],
             sub_tags=json.loads(row["sub_tags"]),
             reason="Human corrected",
+            style_reason=row["style_reason"],
         )
         await persist_crop(
             row["paper_id"],
@@ -609,6 +649,7 @@ async def recrop(fid, page_number, bbox, do_snap=True):
             verdict,
             storage,
             fid,
+            taxonomy_locked=row["taxonomy_locked"],
         )
         with connect() as db:
             db.execute(
@@ -640,6 +681,9 @@ async def rebuild():
 
 
 async def _rebuild():
+    with connect() as db:
+        if db.execute("SELECT 1 FROM asset_transfers WHERE synced=0 LIMIT 1").fetchone():
+            raise ValueError("仍有资产等待远端备份，请在备份完成后恢复索引")
     storage = Storage()
     stack = ["papers"]
     count = 0
@@ -696,3 +740,118 @@ async def _rebuild():
                     count += 1
                 event(db, "library.rebuilt", {"paper_id": p["id"]})
     return count
+
+
+async def retag_taxonomy(
+    scope: str = "all",
+    concurrency: int = 8,
+    vision_driver: str | None = "openai_mini",
+    on_progress=None,
+):
+    clauses = ["COALESCE(taxonomy_locked, 0) = 0"]
+    args: list = []
+    if scope == "method":
+        clauses.append("macro_category = 'method'")
+    elif scope == "data_chart":
+        clauses.append("macro_category = 'data_chart'")
+    elif scope == "untagged":
+        clauses.append(
+            "((macro_category = 'method' AND primary_style IS NULL) OR (macro_category = 'data_chart' AND chart_layout IS NULL))"
+        )
+    elif scope != "all":
+        raise ValueError(f"Unsupported scope: {scope}")
+
+    with connect() as db:
+        skipped_locked = db.execute(
+            "SELECT COUNT(*) FROM figures WHERE COALESCE(taxonomy_locked, 0) = 1"
+        ).fetchone()[0]
+        rows = [
+            dict(r)
+            for r in db.execute(
+                "SELECT id, paper_id, caption, asset_base FROM figures WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY created_at DESC",
+                args,
+            ).fetchall()
+        ]
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+    summary = {
+        "scope": scope,
+        "total": len(rows),
+        "updated": 0,
+        "failed": 0,
+        "skipped_locked": skipped_locked,
+    }
+    touched_papers: set[str] = set()
+    driver = vision_driver or "openai_mini"
+
+    async with Storage() as storage, httpx.AsyncClient(
+        timeout=120,
+        limits=httpx.Limits(
+            max_connections=max(8, concurrency * 2),
+            max_keepalive_connections=max(4, concurrency),
+        ),
+    ) as vlm_client:
+        async def worker(item: dict):
+            async with sem:
+                try:
+                    try:
+                        img = await storage.get(item["asset_base"] + "_thumb.webp")
+                    except Exception:
+                        img = await storage.get(item["asset_base"] + "_hd.webp")
+                    verdict = await judge(
+                        img,
+                        item["caption"] or "",
+                        domains=None,
+                        driver=driver,
+                        use_stage=False,
+                        http_client=vlm_client,
+                    )
+                    if not verdict:
+                        summary["failed"] += 1
+                        return
+                    with connect() as db:
+                        cur = db.execute(
+                            """
+                            UPDATE figures SET
+                              macro_category=?, sub_type=?, archetype=?,
+                              primary_style=?, secondary_style=?, layout_topology=?,
+                              craft_badges_json=?, chart_layout=?,
+                              style_confidence=?, style_reason=?
+                            WHERE id=? AND COALESCE(taxonomy_locked, 0)=0
+                            """,
+                            (
+                                verdict.macro_category,
+                                verdict.sub_type,
+                                verdict.archetype,
+                                verdict.primary_style,
+                                verdict.secondary_style,
+                                verdict.layout_topology,
+                                json.dumps(verdict.craft_badges, ensure_ascii=False),
+                                verdict.chart_layout,
+                                verdict.style_confidence,
+                                verdict.style_reason,
+                                item["id"],
+                            ),
+                        )
+                        if cur.rowcount:
+                            summary["updated"] += 1
+                            touched_papers.add(item["paper_id"])
+                            event(db, "figure.updated", {"id": item["id"]})
+                        else:
+                            summary["skipped_locked"] += 1
+                except Exception:
+                    summary["failed"] += 1
+                finally:
+                    if on_progress:
+                        on_progress(summary)
+
+        await asyncio.gather(*(worker(r) for r in rows))
+        for pid in sorted(touched_papers):
+            try:
+                await backup(pid, storage)
+            except Exception:
+                pass
+
+    return summary

@@ -34,7 +34,16 @@ from .ingest import (
     update_job,
     rebuild,
 )
-from .vision import ARCHETYPES
+from .vision import (
+    ARCHETYPES,
+    MACRO_CATEGORIES,
+    ALL_SUBTYPES,
+    METHOD_STYLES,
+    METHOD_TOPOLOGIES,
+    METHOD_CRAFTS,
+    CHART_LAYOUTS,
+    normalize_taxonomy,
+)
 from .concurrency import snapshot, resource_lock
 from .processing import cpu_call
 from pathlib import Path
@@ -67,7 +76,9 @@ async def stop_tasks():
 
 @router.get("/admin/pipeline")
 def pipeline_status(user=Depends(require_admin)):
-    return {"stages": snapshot(), "configuration": get_settings().pipeline.model_dump()}
+    from .uploads import status
+
+    return {"stages": snapshot(), "configuration": get_settings().pipeline.model_dump(), "storage": status()}
 
 
 def deserialize(row):
@@ -75,6 +86,23 @@ def deserialize(row):
     for key in FIGURE_JSON + PAPER_JSON:
         if key in d and isinstance(d[key], str):
             d[key] = json.loads(d[key])
+    crafts = d.pop("craft_badges_json", None)
+    d["craft_badges"] = crafts if isinstance(crafts, list) else []
+    if not d.get("macro_category") or not d.get("sub_type"):
+        d.update(
+            normalize_taxonomy(
+                macro_category=d.get("macro_category"),
+                sub_type=d.get("sub_type"),
+                archetype=d.get("archetype"),
+                primary_style=d.get("primary_style"),
+                secondary_style=d.get("secondary_style"),
+                layout_topology=d.get("layout_topology"),
+                craft_badges=d["craft_badges"],
+                chart_layout=d.get("chart_layout"),
+            )
+        )
+    if "taxonomy_locked" in d:
+        d["taxonomy_locked"] = int(bool(d.get("taxonomy_locked")))
     if "asset_base" in d:
         d.pop("asset_base", None)
         d["thumb_url"] = f"/api/assets/thumb/{d['id']}.webp?v={d['version_hash']}"
@@ -112,22 +140,40 @@ def stats():
         }
 
 
-def figure_conditions(
-    q,
-    domain,
-    sub_tags,
-    tag_mode,
-    venue,
-    layout,
-    span,
-    archetype,
-    color,
-    view,
-    honors,
-    show_cases,
+def _split_multi(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in re.split(r"[|,]", raw) if part.strip()]
+
+
+def resolve_macro_category(macro_category: str = "", view: str = "all") -> str:
+    if macro_category in ("all", "method", "data_chart"):
+        return macro_category
+    if view == "method":
+        return "method"
+    if view in ("data", "data_chart"):
+        return "data_chart"
+    return "all"
+
+
+def common_conditions(
+    q: str = "",
+    domain: str = "",
+    domains: str = "",
+    sub_tags: str = "",
+    tag_mode: str = "any",
+    venue: str = "",
+    venues: str = "",
+    layout: str = "",
+    paper_layout: str = "",
+    span: str = "",
+    span_type: str = "",
+    color: str = "",
+    color_bucket: str = "",
+    honors: bool = False,
 ):
-    where = []
-    args = []
+    where: list[str] = []
+    args: list = []
 
     def add(clause, *values):
         where.append(clause)
@@ -148,53 +194,229 @@ def figure_conditions(
                 "f.id IN (SELECT figure_id FROM figures_fts WHERE figures_fts MATCH ?)",
                 " AND ".join('"' + w.replace('"', "") + '"*' for w in words[:15]),
             )
-    for field, value in [
-        ("p.venue", venue),
-        ("p.layout_type", layout),
-        ("f.span_type", span),
-        ("f.archetype", archetype),
-    ]:
-        if value:
-            if value == "HF 高热":
-                add("p.hf_upvotes>=?", get_settings().hf_min_upvotes)
+
+    venue_vals = _split_multi(venue or venues)
+    if venue_vals:
+        v_clauses = []
+        v_args = []
+        for val in venue_vals:
+            if val == "HF 高热":
+                v_clauses.append("p.hf_upvotes>=?")
+                v_args.append(get_settings().hf_min_upvotes)
             else:
-                add(field + "=?", value)
-    if domain:
-        add("EXISTS (SELECT 1 FROM json_each(p.domains) WHERE value=?)", domain)
-    if color:
-        add("EXISTS (SELECT 1 FROM json_each(f.color_buckets) WHERE value=?)", color)
-    tags = [t for t in sub_tags.split("|") if t]
+                v_clauses.append("p.venue=?")
+                v_args.append(val)
+        add("(" + " OR ".join(v_clauses) + ")", *v_args)
+
+    eff_layout = layout or paper_layout
+    if eff_layout:
+        add("p.layout_type=?", eff_layout)
+
+    eff_span = span or span_type
+    if eff_span:
+        add("f.span_type=?", eff_span)
+
+    domain_vals = _split_multi(domain or domains)
+    if domain_vals:
+        d_clauses = [
+            "EXISTS (SELECT 1 FROM json_each(p.domains) WHERE value=?)"
+            for _ in domain_vals
+        ]
+        add("(" + " OR ".join(d_clauses) + ")", *domain_vals)
+
+    color_vals = _split_multi(color or color_bucket)
+    if color_vals:
+        c_clauses = [
+            "EXISTS (SELECT 1 FROM json_each(f.color_buckets) WHERE value=?)"
+            for _ in color_vals
+        ]
+        add("(" + " OR ".join(c_clauses) + ")", *color_vals)
+
+    tags = _split_multi(sub_tags)
     if tags:
         clauses = [
             "EXISTS (SELECT 1 FROM json_each(f.sub_tags) WHERE value=?)" for _ in tags
         ]
         add("(" + (" AND " if tag_mode == "all" else " OR ").join(clauses) + ")", *tags)
+
     if honors:
         add("p.venue_tier IN ('oral','spotlight')")
-    if view == "method":
-        add("f.archetype IN ('Teaser','Pipeline','Micro-Mechanism')")
-    if view == "data":
-        add("f.archetype IN ('Curve','Bar','Scatter/Radar','Heatmap')")
-    if not show_cases:
-        add("f.archetype!='Case Study'")
-    suffix = "WHERE " + " AND ".join(where) if where else ""
-    return suffix, args
+
+    return where, args
+
+
+def category_conditions(
+    eff_macro: str = "all",
+    archetype: str = "",
+    method_type: str = "",
+    visual_style: str = "",
+    topology: str = "",
+    craft: str = "",
+    chart_type: str = "",
+    chart_layout: str = "",
+    show_cases: bool = False,
+):
+    where: list[str] = []
+    args: list = []
+
+    def add(clause, *values):
+        where.append(clause)
+        args.extend(values)
+
+    if eff_macro == "method":
+        add("f.macro_category='method'")
+        m_types = _split_multi(method_type)
+        if m_types:
+            add(
+                "f.sub_type IN (" + ",".join("?" for _ in m_types) + ")",
+                *m_types,
+            )
+        styles = _split_multi(visual_style)
+        if styles:
+            placeholders = ",".join("?" for _ in styles)
+            add(
+                f"(f.primary_style IN ({placeholders}) OR f.secondary_style IN ({placeholders}))",
+                *styles,
+                *styles,
+            )
+        topos = _split_multi(topology)
+        if topos:
+            add(
+                "f.layout_topology IN (" + ",".join("?" for _ in topos) + ")",
+                *topos,
+            )
+        crafts = _split_multi(craft)
+        if crafts:
+            placeholders = ",".join("?" for _ in crafts)
+            add(
+                f"EXISTS (SELECT 1 FROM json_each(f.craft_badges_json) WHERE value IN ({placeholders}))",
+                *crafts,
+            )
+    elif eff_macro == "data_chart":
+        add("f.macro_category='data_chart'")
+        c_types = _split_multi(chart_type)
+        if c_types:
+            add(
+                "f.sub_type IN (" + ",".join("?" for _ in c_types) + ")",
+                *c_types,
+            )
+        c_layouts = _split_multi(chart_layout)
+        if c_layouts:
+            add(
+                "f.chart_layout IN (" + ",".join("?" for _ in c_layouts) + ")",
+                *c_layouts,
+            )
+    else:
+        if not show_cases:
+            add("f.macro_category!='case_study'")
+
+    if archetype:
+        add("f.archetype=?", archetype)
+
+    return where, args
+
+
+def _where_sql(clauses: list[str]) -> str:
+    return "WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+def figure_conditions(
+    q: str = "",
+    domain: str = "",
+    sub_tags: str = "",
+    tag_mode: str = "any",
+    venue: str = "",
+    layout: str = "",
+    span: str = "",
+    archetype: str = "",
+    color: str = "",
+    view: str = "all",
+    honors: bool = False,
+    show_cases: bool = False,
+    *,
+    domains: str = "",
+    venues: str = "",
+    paper_layout: str = "",
+    span_type: str = "",
+    color_bucket: str = "",
+    include_cases: bool | None = None,
+    macro_category: str = "",
+    method_type: str = "",
+    visual_style: str = "",
+    topology: str = "",
+    craft: str = "",
+    chart_type: str = "",
+    chart_layout: str = "",
+):
+    eff_cases = include_cases if include_cases is not None else show_cases
+    eff_macro = resolve_macro_category(macro_category, view)
+    c_where, c_args = common_conditions(
+        q=q,
+        domain=domain,
+        domains=domains,
+        sub_tags=sub_tags,
+        tag_mode=tag_mode,
+        venue=venue,
+        venues=venues,
+        layout=layout,
+        paper_layout=paper_layout,
+        span=span,
+        span_type=span_type,
+        color=color,
+        color_bucket=color_bucket,
+        honors=honors,
+    )
+    cat_where, cat_args = category_conditions(
+        eff_macro=eff_macro,
+        archetype=archetype,
+        method_type=method_type,
+        visual_style=visual_style,
+        topology=topology,
+        craft=craft,
+        chart_type=chart_type,
+        chart_layout=chart_layout,
+        show_cases=eff_cases,
+    )
+    return _where_sql(c_where + cat_where), c_args + cat_args
+
+
+def _count_bucket(db, base: str, clauses: list[str], args: list) -> dict:
+    row = db.execute(
+        "SELECT COUNT(*) AS figures, COUNT(DISTINCT f.paper_id) AS papers"
+        + base
+        + _where_sql(clauses),
+        args,
+    ).fetchone()
+    return {"papers": int(row["papers"] or 0), "figures": int(row["figures"] or 0)}
 
 
 @router.get("/figures")
 def list_figures(
     q: str = "",
     domain: str = "",
+    domains: str = "",
     sub_tags: str = "",
     tag_mode: Literal["any", "all"] = "any",
     venue: str = "",
+    venues: str = "",
     layout: str = "",
+    paper_layout: str = "",
     span: str = "",
+    span_type: str = "",
     archetype: str = "",
     color: str = "",
-    view: Literal["all", "method", "data"] = "all",
+    color_bucket: str = "",
+    view: Literal["all", "method", "data", "data_chart"] = "all",
+    macro_category: Literal["", "all", "method", "data_chart"] = "",
+    method_type: str = "",
+    visual_style: str = "",
+    topology: str = "",
+    craft: str = "",
+    chart_type: str = "",
+    chart_layout: str = "",
     honors: bool = False,
     show_cases: bool = False,
+    include_cases: bool | None = None,
     sort: Literal["newest", "popular"] = "newest",
     offset: int = Query(0, ge=0),
     limit: int = Query(24, ge=1, le=100),
@@ -212,6 +434,19 @@ def list_figures(
         view,
         honors,
         show_cases,
+        domains=domains,
+        venues=venues,
+        paper_layout=paper_layout,
+        span_type=span_type,
+        color_bucket=color_bucket,
+        include_cases=include_cases,
+        macro_category=macro_category,
+        method_type=method_type,
+        visual_style=visual_style,
+        topology=topology,
+        craft=craft,
+        chart_type=chart_type,
+        chart_layout=chart_layout,
     )
     with connect() as db:
         total = db.execute(
@@ -255,37 +490,77 @@ def figure_feed(
     group_by: Literal["paper", "none"] = "paper",
     q: str = "",
     domain: str = "",
+    domains: str = "",
     sub_tags: str = "",
     tag_mode: Literal["any", "all"] = "any",
     venue: str = "",
+    venues: str = "",
     layout: str = "",
+    paper_layout: str = "",
     span: str = "",
+    span_type: str = "",
     archetype: str = "",
     color: str = "",
-    view: Literal["all", "method", "data"] = "all",
+    color_bucket: str = "",
+    view: Literal["all", "method", "data", "data_chart"] = "all",
+    macro_category: Literal["", "all", "method", "data_chart"] = "",
+    method_type: str = "",
+    visual_style: str = "",
+    topology: str = "",
+    craft: str = "",
+    chart_type: str = "",
+    chart_layout: str = "",
     honors: bool = False,
     show_cases: bool = False,
+    include_cases: bool | None = None,
     sort: Literal["newest", "popular"] = "newest",
     offset: int = Query(0, ge=0),
     limit: int = Query(16, ge=1, le=100),
 ):
-    suffix, args = figure_conditions(
-        q,
-        domain,
-        sub_tags,
-        tag_mode,
-        venue,
-        layout,
-        span,
-        archetype,
-        color,
-        view,
-        honors,
-        show_cases,
+    eff_cases = include_cases if include_cases is not None else show_cases
+    eff_macro = resolve_macro_category(macro_category, view)
+    c_where, c_args = common_conditions(
+        q=q,
+        domain=domain,
+        domains=domains,
+        sub_tags=sub_tags,
+        tag_mode=tag_mode,
+        venue=venue,
+        venues=venues,
+        layout=layout,
+        paper_layout=paper_layout,
+        span=span,
+        span_type=span_type,
+        color=color,
+        color_bucket=color_bucket,
+        honors=honors,
     )
+    cat_where, cat_args = category_conditions(
+        eff_macro=eff_macro,
+        archetype=archetype,
+        method_type=method_type,
+        visual_style=visual_style,
+        topology=topology,
+        craft=craft,
+        chart_type=chart_type,
+        chart_layout=chart_layout,
+        show_cases=eff_cases,
+    )
+    suffix = _where_sql(c_where + cat_where)
+    args = c_args + cat_args
     base = " FROM figures f JOIN papers p ON p.id=f.paper_id "
     with connect() as db:
         db.execute("BEGIN")
+        all_clauses = c_where + ([] if eff_cases else ["f.macro_category!='case_study'"])
+        tab_counts = {
+            "all": _count_bucket(db, base, all_clauses, c_args),
+            "method": _count_bucket(
+                db, base, c_where + ["f.macro_category='method'"], c_args
+            ),
+            "data_chart": _count_bucket(
+                db, base, c_where + ["f.macro_category='data_chart'"], c_args
+            ),
+        }
         counts = db.execute(
             "SELECT COUNT(*) AS figures,COUNT(DISTINCT f.paper_id) AS papers"
             + base
@@ -331,7 +606,19 @@ def figure_feed(
             groups = {pid: [] for pid in ids}
             for row in rows:
                 groups[row["paper_id"]].append(feed_figure(row))
-            rank = {
+            sub_rank = {
+                "system_pipeline": 0,
+                "concept_teaser": 1,
+                "micro_mechanism": 2,
+                "line_scaling": 3,
+                "bar_ablation": 3,
+                "scatter_pareto": 3,
+                "radar_polar": 3,
+                "distribution_density": 3,
+                "heatmap_matrix": 3,
+                "qualitative_case": 4,
+            }
+            legacy_rank = {
                 "Framework": 0,
                 "Pipeline": 0,
                 "Teaser": 1,
@@ -347,7 +634,13 @@ def figure_feed(
                 figures.sort(key=figure_number)
                 hero = min(
                     figures,
-                    key=lambda f: (rank.get(f["archetype"], 4), figure_number(f)),
+                    key=lambda f: (
+                        sub_rank.get(
+                            f.get("sub_type") or "",
+                            legacy_rank.get(f.get("archetype") or "", 4),
+                        ),
+                        figure_number(f),
+                    ),
                 )
                 paper = {
                     key: hero[key]
@@ -380,6 +673,7 @@ def figure_feed(
         "total": total,
         "total_papers": counts["papers"],
         "total_figures": counts["figures"],
+        "tab_counts": tab_counts,
         "next_offset": offset + len(items) if offset + len(items) < total else None,
     }
 
@@ -389,16 +683,29 @@ def sibling_figures(
     pid: str,
     q: str = "",
     domain: str = "",
+    domains: str = "",
     sub_tags: str = "",
     tag_mode: Literal["any", "all"] = "any",
     venue: str = "",
+    venues: str = "",
     layout: str = "",
+    paper_layout: str = "",
     span: str = "",
+    span_type: str = "",
     archetype: str = "",
     color: str = "",
-    view: Literal["all", "method", "data"] = "all",
+    color_bucket: str = "",
+    view: Literal["all", "method", "data", "data_chart"] = "all",
+    macro_category: Literal["", "all", "method", "data_chart"] = "",
+    method_type: str = "",
+    visual_style: str = "",
+    topology: str = "",
+    craft: str = "",
+    chart_type: str = "",
+    chart_layout: str = "",
     honors: bool = False,
     show_cases: bool = True,
+    include_cases: bool | None = None,
 ):
     suffix, args = figure_conditions(
         q,
@@ -413,6 +720,19 @@ def sibling_figures(
         view,
         honors,
         show_cases,
+        domains=domains,
+        venues=venues,
+        paper_layout=paper_layout,
+        span_type=span_type,
+        color_bucket=color_bucket,
+        include_cases=include_cases,
+        macro_category=macro_category,
+        method_type=method_type,
+        visual_style=visual_style,
+        topology=topology,
+        craft=craft,
+        chart_type=chart_type,
+        chart_layout=chart_layout,
     )
     suffix += (" AND " if suffix else "WHERE ") + "p.id=?"
     with connect() as db:
@@ -464,10 +784,12 @@ async def asset(kind: Literal["thumb", "hd", "raw"], filename: str, v: str = "")
     if v and v != r["version_hash"]:
         raise HTTPException(404, "图片版本已更新")
     try:
-        data = await Storage().get(r["asset_base"] + "_" + kind + ext)
+        storage = Storage()
+        data = await storage.get(r["asset_base"] + "_" + kind + ext)
     except Exception:
         raise HTTPException(502, "远端图像暂时不可用，请稍后重试")
     headers = {
+        "X-FigPrism-Cache": storage.cache_status,
         "Cache-Control": "public, max-age=31536000, immutable"
         if v
         else "public, max-age=60",
@@ -581,26 +903,119 @@ def request_repair(fid: str, user=Depends(require_user)):
 
 
 class Tags(BaseModel):
-    archetype: Literal[
-        "Teaser",
-        "Pipeline",
-        "Micro-Mechanism",
-        "Curve",
-        "Bar",
-        "Scatter/Radar",
-        "Heatmap",
-        "Case Study",
-    ]
-    sub_tags: list[str] = Field(default_factory=list, max_length=20)
+    archetype: (
+        Literal[
+            "Teaser",
+            "Pipeline",
+            "Micro-Mechanism",
+            "Curve",
+            "Bar",
+            "Scatter/Radar",
+            "Heatmap",
+            "Case Study",
+        ]
+        | None
+    ) = None
+    macro_category: Literal["method", "data_chart", "case_study"] | None = None
+    sub_type: (
+        Literal[
+            "concept_teaser",
+            "system_pipeline",
+            "micro_mechanism",
+            "line_scaling",
+            "bar_ablation",
+            "scatter_pareto",
+            "radar_polar",
+            "distribution_density",
+            "heatmap_matrix",
+            "qualitative_case",
+        ]
+        | None
+    ) = None
+    primary_style: str | None = None
+    secondary_style: str | None = None
+    layout_topology: str | None = None
+    craft_badges: list[str] | None = None
+    chart_layout: str | None = None
+    sub_tags: list[str] | None = Field(default=None, max_length=20)
+    taxonomy_locked: bool = True
 
 
 @router.patch("/figures/{fid}")
 async def update_tags(fid: str, body: Tags, user=Depends(require_user)):
     f = figure(fid)
+    fields = body.model_fields_set
+    if not (fields & {"archetype", "macro_category", "sub_type"}):
+        macro_in = f.get("macro_category")
+        sub_in = f.get("sub_type")
+        arch_in = f.get("archetype")
+    elif "macro_category" in fields or "sub_type" in fields:
+        macro_in = body.macro_category
+        sub_in = body.sub_type
+        arch_in = body.archetype or f.get("archetype")
+    else:
+        macro_in = None
+        sub_in = None
+        arch_in = body.archetype
+
+    norm = normalize_taxonomy(
+        macro_category=macro_in,
+        sub_type=sub_in,
+        archetype=arch_in,
+        primary_style=(
+            body.primary_style
+            if "primary_style" in fields
+            else f.get("primary_style")
+        ),
+        secondary_style=(
+            body.secondary_style
+            if "secondary_style" in fields
+            else f.get("secondary_style")
+        ),
+        layout_topology=(
+            body.layout_topology
+            if "layout_topology" in fields
+            else f.get("layout_topology")
+        ),
+        craft_badges=(
+            body.craft_badges
+            if "craft_badges" in fields
+            else f.get("craft_badges", [])
+        ),
+        chart_layout=(
+            body.chart_layout
+            if "chart_layout" in fields
+            else f.get("chart_layout")
+        ),
+    )
+    next_sub_tags = body.sub_tags if body.sub_tags is not None else f.get("sub_tags", [])
     with connect() as db:
         db.execute(
-            "UPDATE figures SET archetype=?,sub_tags=? WHERE id=?",
-            (body.archetype, json.dumps(body.sub_tags), fid),
+            """UPDATE figures
+               SET archetype=?,
+                   macro_category=?,
+                   sub_type=?,
+                   primary_style=?,
+                   secondary_style=?,
+                   layout_topology=?,
+                   craft_badges_json=?,
+                   chart_layout=?,
+                   sub_tags=?,
+                   taxonomy_locked=?
+               WHERE id=?""",
+            (
+                norm["archetype"],
+                norm["macro_category"],
+                norm["sub_type"],
+                norm["primary_style"],
+                norm["secondary_style"],
+                norm["layout_topology"],
+                json.dumps(norm["craft_badges"], ensure_ascii=False),
+                norm["chart_layout"],
+                json.dumps(next_sub_tags, ensure_ascii=False),
+                1 if body.taxonomy_locked else 0,
+                fid,
+            ),
         )
     from .ingest import backup
 

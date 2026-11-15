@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { warmFigureImage } from "@/lib/decoded-image-cache";
 import {
   Bookmark,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   ExternalLink,
   Layers,
@@ -10,7 +13,14 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, post, put } from "@/lib/api";
-import { Figure, PaperGroup, Domain, Board, archetypeNames } from "@/lib/types";
+import {
+  Figure,
+  PaperGroup,
+  Domain,
+  Board,
+  figureTypeLabel,
+  styleShortNames,
+} from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { BlurImage, quickSave, preloadThumbnails } from "./figure-card";
 import { Swatches, useUser } from "./ui";
@@ -40,6 +50,16 @@ function usePreload(figures: Figure[]) {
 export function useHorizontalTrack(count: number, dragEnabled = false) {
   const ref = useRef<HTMLDivElement>(null);
   const [remaining, setRemaining] = useState(0);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const scrollByStep = (direction: -1 | 1) => {
+    const element = ref.current;
+    if (!element) return;
+    element.scrollBy({
+      left: direction * Math.max(220, Math.round(element.clientWidth * 0.72)),
+      behavior: "smooth",
+    });
+  };
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -49,6 +69,10 @@ export function useHorizontalTrack(count: number, dragEnabled = false) {
         [...element.children].filter(
           (child) => child.getBoundingClientRect().right > edge + 2,
         ).length,
+      );
+      setCanScrollLeft(element.scrollLeft > 3);
+      setCanScrollRight(
+        element.scrollLeft + element.clientWidth < element.scrollWidth - 3,
       );
     };
     const wheel = (event: WheelEvent) => {
@@ -140,7 +164,7 @@ export function useHorizontalTrack(count: number, dragEnabled = false) {
       element.removeEventListener("click", click, true);
     };
   }, [count, dragEnabled]);
-  return { ref, remaining };
+  return { ref, remaining, canScrollLeft, canScrollRight, scrollByStep };
 }
 
 export function PaperDeckCard({
@@ -223,6 +247,8 @@ export function PaperDeckCard({
         <>
           <button
             className="figure-open deck-hero"
+            onPointerEnter={() => warmFigureImage(active)}
+            onFocus={() => warmFigureImage(active)}
             aria-label={`查看 ${active.fig_label} ${active.title}`}
             style={{
               aspectRatio: Math.min(2.4, Math.max(1.25, hero.aspect_ratio)),
@@ -231,8 +257,10 @@ export function PaperDeckCard({
           >
             <BlurImage key={active.id} figure={active} />
             <span className="deck-hero-label">
-              {active.fig_label} ·{" "}
-              {archetypeNames[active.archetype] || active.archetype}
+              {active.fig_label} · {figureTypeLabel(active)}
+              {active.primary_style && styleShortNames[active.primary_style]
+                ? ` · ${styleShortNames[active.primary_style]}`
+                : ""}
             </span>
             {active.subitems.length > 1 && (
               <span className="sub-badge">
@@ -397,7 +425,7 @@ export function PaperSwimlane({
               <div className="swimlane-caption">
                 <span title={f.caption}>
                   <strong>{f.fig_label}</strong>{" "}
-                  {f.caption || archetypeNames[f.archetype]}
+                  {f.caption || figureTypeLabel(f)}
                 </span>
                 <Swatches figure={f} small />
               </div>
@@ -435,7 +463,27 @@ export function SiblingFigures({
   onToggleScope?: () => void;
   loading?: boolean;
 }) {
-  const track = useHorizontalTrack(figures.length);
+  const [quickFilter, setQuickFilter] = useState<"all" | "method" | "data_chart">(
+    "all",
+  );
+  const paperId = figures[0]?.paper_id || "";
+  useEffect(() => {
+    setQuickFilter("all");
+  }, [paperId, showAll]);
+
+  const methodCount = figures.filter(
+    (f) => f.macro_category === "method",
+  ).length;
+  const dataCount = figures.filter(
+    (f) => f.macro_category === "data_chart",
+  ).length;
+  const hasMixedCategories = methodCount > 0 && dataCount > 0;
+  const visibleFigures =
+    quickFilter === "all"
+      ? figures
+      : figures.filter((f) => f.macro_category === quickFilter);
+
+  const track = useHorizontalTrack(visibleFigures.length, true);
   useEffect(() => {
     const active = track.ref.current?.querySelector<HTMLElement>(
       '[aria-current="true"]',
@@ -457,8 +505,9 @@ export function SiblingFigures({
           behavior: "smooth",
         });
     }
-  }, [currentId]);
+  }, [currentId, quickFilter]);
   if (figures.length < 2 && !scopeLabel) return null;
+  const activeIdx = visibleFigures.findIndex((f) => f.id === currentId);
   return (
     <div className="sibling-navigation">
       <div className="sibling-label">
@@ -474,8 +523,33 @@ export function SiblingFigures({
         <span>
           {loading
             ? "读取图表…"
-            : `↑ ↓ 切换 · ${figures.findIndex((f) => f.id === currentId) >= 0 ? figures.findIndex((f) => f.id === currentId) + 1 : "—"} / ${figures.length}`}
+            : `↑ ↓ 切换 · ${activeIdx >= 0 ? activeIdx + 1 : "—"} / ${visibleFigures.length}`}
         </span>
+        {hasMixedCategories && (
+          <div className="sibling-quick-tabs" role="group" aria-label="同文图表快筛">
+            <button
+              type="button"
+              className={quickFilter === "all" ? "active" : ""}
+              onClick={() => setQuickFilter("all")}
+            >
+              全部 {figures.length}
+            </button>
+            <button
+              type="button"
+              className={quickFilter === "method" ? "active" : ""}
+              onClick={() => setQuickFilter("method")}
+            >
+              方法 {methodCount}
+            </button>
+            <button
+              type="button"
+              className={quickFilter === "data_chart" ? "active" : ""}
+              onClick={() => setQuickFilter("data_chart")}
+            >
+              实验 {dataCount}
+            </button>
+          </div>
+        )}
         {scopeLabel &&
           totalCount !== undefined &&
           totalCount > (matchedIds?.size || 0) && (
@@ -490,19 +564,31 @@ export function SiblingFigures({
             </button>
           )}
       </div>
-      <div className="filmstrip-wrap">
+      <div className="filmstrip-wrap sibling-strip-wrap">
+        {track.canScrollLeft && (
+          <button
+            type="button"
+            className="sibling-arrow left"
+            aria-label="向左滑动同篇图表"
+            onClick={() => track.scrollByStep(-1)}
+          >
+            <ChevronLeft size={14} />
+          </button>
+        )}
         <div
           ref={track.ref}
           className="sibling-track"
           aria-label="同篇论文图表导航"
         >
-          {figures.map((f) => (
+          {visibleFigures.map((f) => (
             <button
               key={f.id}
               aria-label={`同文 ${f.fig_label}`}
               aria-current={f.id === currentId ? "true" : undefined}
               className={`${f.id === currentId ? "active" : ""} ${matchedIds && !matchedIds.has(f.id) ? "outside-filter" : ""}`}
               data-archetype={f.archetype}
+              data-macro={f.macro_category}
+              data-subtype={f.sub_type}
               data-matched={
                 matchedIds ? String(matchedIds.has(f.id)) : undefined
               }
@@ -518,7 +604,7 @@ export function SiblingFigures({
               <span className="sibling-meta">
                 <strong>{f.fig_label}</strong>
                 <small>
-                  {archetypeNames[f.archetype] || f.archetype}
+                  {figureTypeLabel(f)}
                   {matchedIds && !matchedIds.has(f.id) ? " · 其他" : ""}
                 </small>
               </span>
@@ -529,6 +615,16 @@ export function SiblingFigures({
           <div className="strip-fade" aria-hidden="true">
             <span>+{track.remaining}</span>
           </div>
+        )}
+        {track.canScrollRight && (
+          <button
+            type="button"
+            className="sibling-arrow right"
+            aria-label="向右滑动同篇图表"
+            onClick={() => track.scrollByStep(1)}
+          >
+            <ChevronRight size={14} />
+          </button>
         )}
       </div>
     </div>

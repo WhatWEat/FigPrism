@@ -26,6 +26,41 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  uploader:
+    image: figprism-v2-backend
+    command: ["figprism", "storage", "worker"]
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      FIGPRISM_CONFIG: /app/config/local.yaml
+      FIGPRISM_DATA_DIR: /app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  coldstart:
+    profiles: ["maintenance"]
+    image: figprism-v2-backend
+    command: ["figprism", "backfill", "--years", "2026", "--limit-per-domain", "5"]
+    restart: "on-failure:3"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      FIGPRISM_CONFIG: /app/config/local.yaml
+      FIGPRISM_DATA_DIR: /app/data
+      FIGPRISM_LAYOUT_MODEL: /app/data/models/doclayout.onnx
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
   frontend:
     build:
       context: .

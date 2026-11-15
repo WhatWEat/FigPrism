@@ -16,7 +16,9 @@ vision:
 # queues crops for review instead of claiming model-level accuracy.
 layout_model: null
 hf_min_upvotes: 20
-cache_max_bytes: 2147483648
+# Shared budget for pending uploads, thumbnails, PDFs and HD cache (3 GB maximum).
+cache_max_bytes: 3000000000
+favorite_cache_bytes: 500000000 # reserved within the total budget
 # Stage limits are shared across API/CLI/timer processes using the data volume.
 # Restart all coordinators together after changing limits.
 pipeline:

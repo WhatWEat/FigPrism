@@ -1,6 +1,9 @@
 """Anonymous scholarly discovery and conservative venue verification."""
 
 import asyncio
+import hashlib
+import os
+import time
 import json
 import re
 import unicodedata
@@ -95,7 +98,7 @@ async def arxiv_search(domain, days=3, years=None, max_results=80):
         "cat:" + c for c in domain.get("arxiv_cats", ["cs.AI", "cs.CL", "cs.LG"])
     )
     if years:
-        start = f"{min(years)}01010000"
+        start = f"{min(years) - 1}01010000"
         end = f"{max(years)}12312359"
     else:
         start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
@@ -225,7 +228,8 @@ async def verified(paper):
         return paper
     for verifier in (verify_openreview, verify_dblp):
         try:
-            v = await verifier(paper["title"])
+            async with asyncio.timeout(10):
+                v = await verifier(paper["title"])
         except Exception:
             continue
         if v:
@@ -261,6 +265,39 @@ async def openalex_growth(title):
     return 0
 
 
+VERIFICATION_TIMEOUT = 25
+
+
+async def cached_verification(paper):
+    root = get_settings().data_dir / ".pipeline" / "discovery" / "verification"
+    key = hashlib.sha256(normalized(paper["title"]).encode()).hexdigest()
+    path = root / (key + ".json")
+    if path.exists():
+        cached = json.loads(path.read_text())
+        ttl = 86400 if cached["paper"] else 3600
+        if time.time() - cached["at"] < ttl:
+            if not cached["paper"]:
+                return None
+            result = dict(paper)
+            for field in ("venue", "venue_year", "venue_tier"):
+                if field in cached["paper"]:
+                    result[field] = cached["paper"][field]
+            result["source_urls"] = {
+                **paper.get("source_urls", {}),
+                **cached["paper"].get("source_urls", {}),
+            }
+            return result
+    async with asyncio.timeout(VERIFICATION_TIMEOUT):
+        result = await verified(paper)
+    root.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix("." + os.urandom(4).hex() + ".tmp")
+    temp.write_text(
+        json.dumps({"at": time.time(), "paper": result}, ensure_ascii=False)
+    )
+    temp.replace(path)
+    return result
+
+
 async def _sync(
     source="all",
     days=3,
@@ -272,130 +309,174 @@ async def _sync(
     user_id=None,
     vision_driver=None,
 ):
+    from .ingest import new_job
+    from .retry import error_message
+
     configs = [
         d for d in all_domains() if domain == "all" or d["slug"] in domain.split(",")
     ]
     if not configs:
         raise ValueError("没有匹配的激活领域")
-    candidates = []
-    errors = []
     limits = get_settings().pipeline
-    update_job(job_id, 2, "正在并行召回候选论文")
-
-    async def discover(d):
-        try:
-            if d is None:
-                return await hf_daily(days)
-            return await arxiv_search(
-                d, days, years if backfill else None, max(50, limit * 3)
-            )
-        except Exception:
-            errors.append(
-                ("HF Daily" if d is None else d["slug"] + " arXiv") + " 暂时不可用"
-            )
-            return []
-
-    requests = ([None] if source in ("all", "hf") and not backfill else []) + (
-        configs if source in ("all", "arxiv") else []
-    )
-    for batch in await bounded_map(discover, requests, limits.metadata):
-        candidates.extend(batch)
-    # Merge HF/arXiv versions under the canonical identifier instead of losing hotness.
-    dedup = {}
-    for paper in candidates:
-        key = re.sub(r"v\d+$", "", paper["arxiv_id"])
-        if key in dedup:
-            previous = dedup[key]
-            paper["hf_upvotes"] = max(
-                paper.get("hf_upvotes", 0), previous.get("hf_upvotes", 0)
-            )
-            paper["source_urls"] = {
-                **previous.get("source_urls", {}),
-                **paper.get("source_urls", {}),
-            }
-            for field in ("venue", "venue_year", "venue_tier"):
-                if field not in paper and field in previous:
-                    paper[field] = previous[field]
-        dedup[key] = paper
-    checked = 0
-
-    async def verify(p):
-        nonlocal checked
-        domains = match_domains(
-            p["title"] + " " + p.get("abstract", "") + " " + p.get("keywords", ""),
-            configs,
-        )
-        if not domains:
-            return None
-        with connect() as db:
-            if db.execute(
-                "SELECT id FROM papers WHERE doc_uid=? AND ingest_status='completed'",
-                (p["doc_uid"],),
-            ).fetchone():
-                return None
-        p = await verified(p)
-        checked += 1
-        update_job(
-            job_id,
-            5 + int(25 * checked / max(1, len(dedup))),
-            f"正在并行核验论文 · {checked}/{len(dedup)}",
-        )
-        if not p or (backfill and p.get("venue_year") not in years):
-            return None
-        p["domains"] = domains
-        p["citation_growth"] = await openalex_growth(p["title"]) if backfill else 0
-        return p
-
-    eligible = [
-        p for p in await bounded_map(verify, dedup.values(), limits.metadata) if p
-    ]
-    eligible.sort(
-        key=lambda p: (
-            {"oral": 3, "spotlight": 2, "poster": 1}.get(p.get("venue_tier"), 0),
-            p.get("hf_upvotes", 0),
-            p.get("citation_growth", 0),
-        ),
-        reverse=True,
-    )
-    chosen = []
     counts = {d["slug"]: 0 for d in configs}
-    for p in eligible:
-        if not any(counts[d] < limit for d in p["domains"]):
-            continue
-        chosen.append(p)
-        for d in p["domains"]:
-            counts[d] += 1
-    completed = 0
-    failed = 0
+    completed = failed = checked = 0
+    errors = []
+    seen = set()
+    with connect() as db:
+        done_titles = {
+            normalized(r[0])
+            for r in db.execute(
+                "SELECT title FROM papers WHERE ingest_status='completed'"
+            )
+        }
+
+    def quota_open():
+        return any(n < limit for n in counts.values())
 
     async def ingest(p):
         nonlocal completed, failed
-        # A child job exposes each paper's stage progress; the batch reports totals.
-        from .ingest import new_job
-        from .retry import error_message
-
         child = new_job(
             user_id, "ingest", {"input": p["source_urls"]["pdf"], "batch_id": job_id}
         )
         try:
             update_job(child, 3, "正在下载论文 PDF")
             data = await fetch(p["source_urls"]["pdf"])
-            await ingest_pdf(data, p, user_id, child, vision_driver=vision_driver)
+            await ingest_pdf(
+                data,
+                p,
+                user_id,
+                child,
+                vision_driver=vision_driver,
+                source_data=b""
+                if p.get("source_type") == "cvf" and not p.get("arxiv_id")
+                else None,
+            )
             completed += 1
         except Exception as exc:
             failed += 1
             update_job(child, 0, error_message(exc), "failed")
-        done = completed + failed
         update_job(
             job_id,
-            30 + int(65 * done / max(1, len(chosen))),
-            f"并行入库 · 完成 {completed} / 失败 {failed} / 共 {len(chosen)} 篇",
+            30,
+            f"边核验边入库 · 完成 {completed} / 失败 {failed} / 已核验 {checked}",
         )
 
-    await bounded_map(ingest, chosen, limits.papers + 1)
-    status = (
+    async def publish(batch):
+        chosen = []
+        for p in sorted(
+            batch,
+            key=lambda p: (
+                {"oral": 3, "spotlight": 2, "poster": 1}.get(p.get("venue_tier"), 0),
+                p.get("hf_upvotes", 0),
+            ),
+            reverse=True,
+        ):
+            title = normalized(p["title"])
+            if title in seen or title in done_titles:
+                continue
+            p["domains"] = [d for d in p.get("domains", []) if d in counts]
+            if not any(counts[d] < limit for d in p["domains"]):
+                continue
+            seen.add(title)
+            chosen.append(p)
+            for d in p["domains"]:
+                counts[d] += 1
+        await bounded_map(ingest, chosen, limits.papers + 1)
+
+    # Proceedings are indexed by conference year, so CVPR is not lost behind
+    # November arXiv papers or the preprint's submission year.
+    if backfill and source in ("all", "cvf"):
+        update_job(job_id, 2, "正在召回 CVF 官方 CVPR 主会论文")
+        try:
+            from .cvf import discover as cvf_discover
+
+            official = await cvf_discover(configs, years, limit)
+            checked += len(official)
+            await publish(official)
+        except Exception as exc:
+            errors.append("CVF 目录暂时不可用：" + error_message(exc))
+
+    if source != "cvf" and quota_open():
+
+        async def discover(d):
+            try:
+                async with asyncio.timeout(60):
+                    if d is None:
+                        return await hf_daily(days)
+                    return await arxiv_search(
+                        d, days, years if backfill else None, max(50, limit * 3)
+                    )
+            except Exception:
+                errors.append(
+                    ("HF Daily" if d is None else d["slug"] + " arXiv") + " 暂时不可用"
+                )
+                return []
+
+        update_job(job_id, 5, f"已入库 {completed} 篇，正在召回补充候选")
+        requests = ([None] if source in ("all", "hf") and not backfill else []) + (
+            configs if source in ("all", "arxiv") else []
+        )
+        candidates = []
+        for batch in await bounded_map(discover, requests, limits.metadata):
+            candidates.extend(batch)
+        dedup = {}
+        for p in candidates:
+            key = re.sub(r"v\d+$", "", p.get("arxiv_id") or p["doc_uid"])
+            if key in dedup:
+                old = dedup[key]
+                p["hf_upvotes"] = max(p.get("hf_upvotes", 0), old.get("hf_upvotes", 0))
+                p["source_urls"] = {
+                    **old.get("source_urls", {}),
+                    **p.get("source_urls", {}),
+                }
+                for field in ("venue", "venue_year", "venue_tier"):
+                    if field not in p and field in old:
+                        p[field] = old[field]
+            dedup[key] = p
+
+        async def verify(p):
+            nonlocal checked
+            if normalized(p["title"]) in done_titles or normalized(p["title"]) in seen:
+                return None
+            domains = match_domains(
+                p["title"] + " " + p.get("abstract", "") + " " + p.get("keywords", ""),
+                configs,
+            )
+            if not any(counts[d] < limit for d in domains):
+                return None
+            try:
+                p = p if p.get("venue") in VENUES else await cached_verification(p)
+                if not p or (backfill and p.get("venue_year") not in years):
+                    return None
+                p["domains"] = domains
+                return p
+            except (TimeoutError, ValueError):
+                return None
+            finally:
+                checked += 1
+                update_job(
+                    job_id,
+                    10,
+                    f"补充核验 {checked} 篇 · 已入库 {completed} / 失败 {failed}",
+                )
+
+        # Known accepted papers are ingested before slow external verification.
+        known = [p for p in dedup.values() if p.get("venue") in VENUES]
+        unknown = [p for p in dedup.values() if p.get("venue") not in VENUES]
+        await publish(
+            [p for p in await bounded_map(verify, known, limits.metadata) if p]
+        )
+        width = limits.metadata * 2
+        for start in range(0, len(unknown), width):
+            if not quota_open():
+                break
+            batch = await bounded_map(
+                verify, unknown[start : start + width], limits.metadata
+            )
+            await publish([p for p in batch if p])
+    state = (
         "failed"
-        if (not candidates and errors) or (failed and not completed)
+        if (failed and not completed) or (not completed and errors)
         else "completed"
     )
     update_job(
@@ -403,7 +484,7 @@ async def _sync(
         100,
         f"入库 {completed} 篇，失败 {failed} 篇"
         + ("；" + "；".join(errors) if errors else ""),
-        status,
+        state,
     )
     return {"completed": completed, "failed": failed, "source_errors": errors}
 

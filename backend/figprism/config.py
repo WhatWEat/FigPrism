@@ -48,7 +48,8 @@ class Settings(BaseModel):
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     layout_model: str | None = None
     hf_min_upvotes: int = 20
-    cache_max_bytes: int = 2 * 1024**3
+    cache_max_bytes: int = Field(default=3_000_000_000, ge=1, le=3_000_000_000)
+    favorite_cache_bytes: int = Field(default=500_000_000, ge=0, le=500_000_000)
     max_pdf_bytes: int = 50 * 1024**2
 
 

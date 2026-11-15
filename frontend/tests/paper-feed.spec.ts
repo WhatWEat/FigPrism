@@ -82,7 +82,20 @@ test("three feed modes persist and filtering only returns matched figures", asyn
   await page.goto("/");
   await page.getByRole("button", { name: "横排画册流", exact: true }).click();
   await expect(page.locator(".paper-swimlane").first()).toBeVisible();
-  const track = page.locator(".swimlane-track").first();
+  const tracks = page.locator(".swimlane-track");
+  const trackCount = await tracks.count();
+  let overflowIdx = 0;
+  for (let i = 0; i < trackCount; i++) {
+    const canScroll = await tracks
+      .nth(i)
+      .evaluate((el) => el.scrollWidth > el.clientWidth + 20);
+    if (canScroll) {
+      overflowIdx = i;
+      break;
+    }
+  }
+  const track = tracks.nth(overflowIdx);
+  await track.scrollIntoViewIfNeeded();
   await track.hover();
   await page.mouse.wheel(0, 450);
   await expect
@@ -96,11 +109,28 @@ test("three feed modes persist and filtering only returns matched figures", asyn
   await expect(page.locator(".flat-feed .figure-card").first()).toBeVisible();
   await expect(page.locator(".paper-deck")).toHaveCount(0);
   await page.getByRole("button", { name: "图组胶片流", exact: true }).click();
+  await expect(
+    page.locator('[data-tab-count="all"]'),
+  ).toHaveText(/^\d+$/);
+  await expect(
+    page.locator('[data-tab-count="method"]'),
+  ).toHaveText(/^\d+$/);
+  await expect(
+    page.locator('[data-tab-count="data_chart"]'),
+  ).toHaveText(/^\d+$/);
+  await page.getByRole("button", { name: "数据实验图", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "💡 概念总览", exact: true }),
+  ).toHaveCount(0);
   await page
-    .getByRole("button", { name: "折线 / Scaling", exact: true })
+    .getByRole("button", { name: "📈 折线 / Scaling", exact: true })
     .click();
+  await expect(page).toHaveURL(/macro_category=data_chart/);
+  await expect(page).toHaveURL(/chart_type=line_scaling/);
   const filtered = await (
-    await request.get("/api/figures/feed?archetype=Curve")
+    await request.get(
+      "/api/figures/feed?macro_category=data_chart&chart_type=line_scaling",
+    )
   ).json();
   await expect(page.locator(".paper-deck")).toHaveCount(filtered.items.length);
   for (const group of filtered.items) {
@@ -116,6 +146,14 @@ test("three feed modes persist and filtering only returns matched figures", asyn
       `共 ${group.matched_figures.length} 张图`,
     );
   }
+  await page.getByRole("button", { name: "方法架构图", exact: true }).click();
+  await expect(page).not.toHaveURL(/chart_type=/);
+  await expect(
+    page.getByRole("button", { name: "📐 朴素框图", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "📈 折线 / Scaling", exact: true }),
+  ).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
@@ -211,6 +249,29 @@ test("fixed warm paper ignores old preferences and preserves original eyedropper
       .locator(".image-wrap")
       .evaluate((el) => getComputedStyle(el).backgroundColor),
   ).toBe("rgb(230, 226, 218)");
+  await page.keyboard.press("i");
+  const scrollEl = page.locator(".canvas-scroll");
+  const stageEl = page.locator(".image-stage");
+  const sBox = (await scrollEl.boundingBox())!;
+  const stBox = (await stageEl.boundingBox())!;
+  expect(stBox.width).toBeLessThanOrEqual(sBox.width + 4);
+  expect(stBox.height).toBeLessThanOrEqual(sBox.height + 4);
+  await page.mouse.move(sBox.x + sBox.width / 2, sBox.y + sBox.height / 2);
+  await page.mouse.wheel(0, -500);
+  await expect(scrollEl).toHaveClass(/pannable/);
+  await page.mouse.move(sBox.x + sBox.width * 0.65, sBox.y + sBox.height * 0.65);
+  await page.mouse.down();
+  await page.mouse.move(
+    sBox.x + sBox.width * 0.35,
+    sBox.y + sBox.height * 0.35,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  expect(
+    await scrollEl.evaluate((el) => el.scrollLeft > 0 || el.scrollTop > 0),
+  ).toBeTruthy();
+  await page.getByRole("button", { name: "适应窗口" }).click();
+  await expect(scrollEl).not.toHaveClass(/pannable/);
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(

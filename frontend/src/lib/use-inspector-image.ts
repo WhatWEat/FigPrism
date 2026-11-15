@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Figure } from "./types";
+import { cachedImage, loadDecodedImage, setActiveImage } from "./decoded-image-cache";
 
 type DisplayImage = { id: string; src: string; hd: boolean; alt: string };
 
@@ -16,6 +17,7 @@ export function useInspectorImage(
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!selectedId) {
+      setActiveImage("");
       setDisplayed(null);
       setLoadedSrc("");
       setError(false);
@@ -24,14 +26,16 @@ export function useInspectorImage(
     if (!figure || figure.id !== selectedId) return;
     let cancelled = false;
     let fullReady = false;
-    const full = new Image();
-    const thumb = new Image();
+    setActiveImage(figure.hd_url);
     const id = figure.id;
     const alt = figure.caption || figure.title;
     setError(false);
-    full.src = figure.hd_url;
-    full
-      .decode()
+    const cached = cachedImage(figure.hd_url);
+    if (cached) {
+      fullReady = true;
+      setDisplayed({ id, src: figure.hd_url, hd: true, alt });
+    }
+    loadDecodedImage(figure.hd_url)
       .then(() => {
         if (!cancelled) {
           fullReady = true;
@@ -41,9 +45,7 @@ export function useInspectorImage(
       .catch(() => {
         if (!cancelled) setError(true);
       });
-    thumb.src = figure.thumb_url;
-    thumb
-      .decode()
+    loadDecodedImage(figure.thumb_url, "low")
       .then(() => {
         if (!cancelled && !fullReady)
           setDisplayed({ id, src: figure.thumb_url, hd: false, alt });
@@ -51,8 +53,7 @@ export function useInspectorImage(
       .catch(() => {});
     return () => {
       cancelled = true;
-      full.src = "";
-      thumb.src = "";
+      // Shared loads may be reused by the next selection or a later reopen.
     };
   }, [selectedId, figure?.id, figure?.hd_url, figure?.thumb_url, attempt]);
   const visible =

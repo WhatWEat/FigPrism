@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { decode } from "blurhash";
+import { warmFigureImage } from "@/lib/decoded-image-cache";
 import { Bookmark, Layers, ArrowUpRight } from "lucide-react";
 import { Figure, Board } from "@/lib/types";
 import { useUI } from "@/lib/store";
@@ -104,6 +105,8 @@ export function FigureCard({
       <div className="figure-frame">
         <button
           className="figure-open"
+          onPointerEnter={() => warmFigureImage(f)}
+          onFocus={() => warmFigureImage(f)}
           aria-label={`查看 ${f.fig_label} ${f.title}`}
           onClick={() => (onSelect ? onSelect(f.id) : ui.select(f.id))}
         >

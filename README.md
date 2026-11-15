@@ -1,154 +1,218 @@
+<div align="center">
+
 # FigPrism
 
-以论文图表为中心的科研灵感库。Next.js + FastAPI + SQLite（WAL/FTS5），WebDAV 保存原文与图像，本机保存索引、缩略图及有上限的高清缓存。
+### 以学术图表为一等公民的顶会科研绘图审美、构图拆解与配色灵感平台
 
-生产地址：**https://figprism.ai4any.com**。服务运行在本机 Docker Compose，Nginx 提供 HTTPS；域名 A 记录直接指向本机。旧域名 `fig.zhcanfly.com` 和 `figprsim.zhcanfly.com` 保留并重定向至新地址。
+**A Figure-First Research Gallery & Aesthetic Deconstruction Workspace for AI / ML Papers**
 
-## 已实现
+[![Live Site](https://img.shields.io/badge/Live_Demo-figprism.ai4any.com-3730a3?style=for-the-badge)](https://figprism.ai4any.com)
+[![GitHub](https://img.shields.io/badge/GitHub-WhatWEat%2FFigPrism-181615?style=for-the-badge&logo=github)](https://github.com/WhatWEat/FigPrism)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-1f1d1a?style=flat-square&logo=nextdotjs)](https://nextjs.org/)
+[![React 19](https://img.shields.io/badge/React-19-1f1d1a?style=flat-square&logo=react)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-1f1d1a?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![SQLite FTS5](https://img.shields.io/badge/SQLite-WAL_%2B_FTS5-1f1d1a?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 
-- 默认按论文归集的胶片图组（悬停预览、原地展开）、横排画册与单图平铺三态视图；同文缩略导航和 ↑ / ↓ 切图。
-- 暖纸护眼配色、高对比文字、固定启用的纸感融合；吸管始终读取原始未混合像素。
-- 访客看图、全文检索（支持 `font:Helvetica`、`ratio:>2.0`）、领域/子标签/会议/版式/形态/色相筛选。
-- 高清图表检视器、BlurHash 缩略图占位、子图聚光灯、像素吸管、HEX/RGB/Matplotlib/LaTeX/CSS 配色导出、矢量 PDF 与 TikZ 下载。
-- 邀请制账号、Argon2 密码、可撤销 Cookie 会话、角色权限、私有看板、笔记、ZIP 导出、浏览和取色历史。
-- 链接/本地 PDF 入库、SHA-256 判重、TeX 安全解析、DocLayout-YOLO ONNX CPU 检测、矢量墨迹吸附、450 DPI 渲染、科学配色及子图热区。
-- 手动重切、标签修正、精修任务队列、逐图 SSE 更新；WebDAV 元数据备份与重建。
-- HF Daily / arXiv 召回、OpenReview / DBLP 录用核验、OpenAlex 引用排序、2025–2026 冷启动命令、管理界面和每日同步。
+🌐 **在线体验**：[**https://figprism.ai4any.com**](https://figprism.ai4any.com) &nbsp;|&nbsp; 📖 **全局规格**：[docs/PRD.md](docs/PRD.md) &nbsp;|&nbsp; 🛠️ **架构文档**：[docs/implementation.md](docs/implementation.md)
 
-## 本地开发
+</div>
 
+---
+
+写论文画图没灵感、配完色总觉得发脏、在几百页 PDF 里反复翻找高颜值架构图与 Scaling Curve？
+
+**FigPrism** 是一个专为 AI / ML 研究者打造的**「以科研图表为一等公民（Figure-First）」**审美与检索平台：自动从 `arXiv`、`Hugging Face Daily Papers`、`OpenReview`、`DBLP` 与 `CVF Open Access` 收集顶会论文，抽取出**高保真矢量切片与 450 DPI 超清图表**，通过视觉大模型完成**方法架构画风 × 空间拓扑骨架 × 局部巧思**与**实验图表排版**结构化拆解，并在感知均匀的 **OKLab / OKLCH** 空间提取「浅色填充 + 同色相深色描边」成对科研配色，支持一键导出 `Matplotlib` / `LaTeX xcolor` / `CSS`。
+
+> ✨ 无需登录即可直接浏览公开图库、三维精细筛选、像素级吸管取色、导出配色代码与下载矢量 PDF / TikZ 源码。
+
+---
+
+## ✨ 核心亮点 (Why FigPrism?)
+
+### 1. 🎞️ 论文图组胶片流 (`Paper Deck`) + 三态浏览视图
+- **按篇归集，不再被同篇散落大图刷屏**：默认以「论文图组卡」呈现每篇论文的 Hero 主视觉、顶会录用徽章（`ICLR / ICML / CVPR / NeurIPS / ACL / EMNLP` + `Oral / Spotlight`）、整篇去重总色板与图表清单。
+- **胶片条零延迟悬停切图**：桌面端悬停底部缩略图胶片带，即时切换主图展示与单图专属色板；支持卡片内直接展开同文全图。
+- **三态视图一键切换**：支持 **论文图组流 (`Deck`)**、**横排画册流 (`Swimlane`)** 与 **单图瀑布流 (`Flat`)**，偏好持久化在本地浏览器。
+
+### 2. 🧭 方法架构图 × 数据实验图强隔离精筛体系
+彻底告别“方法图和折线图混排筛选”，在顶栏切换大类时自动切换并隔离专属筛选项，同时实时展示各分类桶独立计数：
+
+#### 方法架构图三维审美拆解（定位 × 画风 × 骨架 × 巧思）
+| 维度 | 支持标签 |
+| --- | --- |
+| **功能定位 (`sub_type`)** | 💡 概念总览 (`concept_teaser`) · 🏗️ 方法主框架 (`system_pipeline`) · 🔬 局部算子机制 (`micro_mechanism`) |
+| **8 类视觉画风 (`primary / secondary_style`)** | 📐 朴素框图 · 🌿 清新图标 · ✨ 高级渐变 · 🍱 稠密全景 · ⚡ 大开大合 · 🧮 张量数理 · 🧊 立体轴测 · 📰 刊物极简 |
+| **6 类空间拓扑 (`layout_topology`)** | ➡️ 串联流水线 · 🔍 局部放大展开 · ⚖️ 正反双轨对比 · 🪟 多阶段分栏 · 🔄 循环博弈闭环 · 🌿 分支/采样树 |
+| **4 项局部巧思 (`craft_badges`)** | ❄️🔥 冻结/可训标识 · 📊 图+实验混排 · 💬 Prompt 卡片 · 🗂️ 独立图例框 |
+
+#### 数据实验图双维细分（图形 × 排版）
+| 维度 | 支持标签 |
+| --- | --- |
+| **6 类统计图形 (`sub_type`)** | 📈 折线 / Scaling · 📊 柱状 / 消融与胜率 · 🎯 帕累托 / 散点气泡 · 🕸️ 多维雷达图 · 🎻 分布 / 箱线 / 密度 · 🟧 热力 / 矩阵图 |
+| **4 种排版形态 (`chart_layout`)** | 🖼️ 单图特写 · 田 多子图网格 (`1×N / 2×2`) · 🔎 局部放大窗 (`Inset`) · 🔀 双轴 / 柱线组合 |
+
+### 3. 🎨 OKLab/OKLCH 科研级深浅配对取色 & 离屏原色吸管
+- **精准剥离背景噪音**：自动过滤论文白底与坐标轴中性灰，在 `OKLab` 感知均匀空间聚类出主导色，并按 `OKLCH` 明度与色相角自动配对**浅色填充 (`Fill`) + 同色相深色描边 (`Stroke`)**。
+- **科研工作流一键复制**：色卡支持直接复制 `HEX`、`RGB`、`Matplotlib Python List`、`LaTeX xcolor (\definecolor)` 与 `CSS` 变量。
+- **护眼暖宣纸体系 + 像素级色彩零失真**：全站采用暖燕麦画布（`#EDEAE4`）与象牙米白表面（`#FAF8F5`），图表通过显示层 `multiply` 柔和融纸；详情页放大镜吸管（Loupe Eyedropper）严格从**离屏未混合原始图像**采样，确保取色 100% 忠于原始像素。
+
+### 4. 🔍 高精度矢量切图 & 交互式检视器 (`Inspector`)
+- **双通道高清提取**：优先解析 `arXiv` TeX 源码包提取原生矢量 PDF 子图与 **TikZ 源码**；无源码时通过 `DocLayout-YOLO` ONNX 神经版面分析 + `PyMuPDF` **矢量路径与非白墨迹包络吸附 (`Vector-Ink Snap`)**，生成最高 `450 DPI` WebP 与局部矢量 PDF 切片。
+- **沉浸式检视体验**：支持滚轮无级缩放与拖拽平移、`(a)(b)(c)` **多子图聚光灯联动**、同篇图表快速切换（支持键盘 `↑ / ↓`），以及登录用户的 **网页端框选重切** 与分类纠错锁定。
+
+### 5. 📚 6 大前沿 AI 领域词库 & 自动顶会核验
+- 内置 6 个持续追踪的 AI 研究领域词库（可在 `/admin` 动态维护并同步到 `config/domains.yaml`）：
+  `多模态与幻觉` · `后训练策略 (GRPO/DPO/RLVR)` · `推理与计算扩展` · `自演化与递归改进 (RSI)` · `记忆机制` · `数据筛选与合成`
+- 联动 `HF Daily Papers`、`arXiv`、`OpenReview`、`DBLP` 与 `CVF Open Access` 自动核验会议录用信息与引用热度。
+- 支持高级全文与元信息检索（如 `font:Helvetica`、`ratio:>2.0` 等组合条件）。
+
+### 6. 📌 私有灵感看板 (`Moodboard`) & 一键打包导出
+- 支持整篇论文批量收藏、单图/子图聚焦收藏与科研笔记记录，双轨记录浏览历史与取色历史。
+- 一键导出 `figprism-moodboard.zip`，内含看板中全部图表的**高清 WebP、原生矢量 `.pdf`、`palettes.py`、`palettes.tex` 与 `notes.json`**。
+
+---
+
+## 🏗️ 技术架构 (Architecture)
+
+| 模块 | 技术选型与核心实现 |
+| --- | --- |
+| **前端应用** | Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 · TanStack Query · Zustand · BlurHash |
+| **后端服务** | FastAPI · Python 3.12 · SQLite (WAL + FTS5 全文索引) · SSE 实时事件流 (`/api/stream/events`) |
+| **图表提取** | Safe TeX Source Parser · `DocLayout-YOLO` ONNX CPU 推理 · `PyMuPDF` 矢量墨迹吸附与 450 DPI 渲染（短生命周期子进程隔离） |
+| **视觉审美打标** | OpenAI Vision Structured Outputs（`backend/prompts/vision_judge_system.md` + JSON Schema） |
+| **配色引擎** | `OKLab` 确定性感知聚类 + `OKLCH` 浅填充 / 深描边自动配对 (`backend/figprism/palette.py`) |
+| **认证与安全** | 邀请制注册 · Argon2 密码哈希 · 可撤销服务端 Cookie 会话 (`HttpOnly`, `SameSite=Lax`) · 同源写校验 · 私有接口 `no-store` |
+| **存储与并发** | 本地分层资产缓存（默认 3 GB 预算，含收藏专用池）+ WebDAV 异步备份队列 · 跨进程内核文件锁分阶段并发控制 |
+
+---
+
+## 🚀 快速开始 (Quick Start)
+
+### 方式一：本地开发环境
+
+#### 1. 准备后端环境与配置
 ```bash
+git clone https://github.com/WhatWEat/FigPrism.git
+cd FigPrism
+
+# 安装 Python 依赖（推荐使用 uv，也可使用标准 python -m venv）
 uv venv .venv
 uv pip install --python .venv/bin/python -r backend/requirements.lock
 uv pip install --python .venv/bin/python -e './backend[test]' --no-deps
-# 测试依赖若未安装：uv pip install --python .venv/bin/python pytest pytest-asyncio
+
+# 准备配置文件（参考 config/settings.example.yaml 填写 WebDAV 与视觉模型配置）
+cp config/settings.example.yaml config/local.yaml
+# 如已有独立文本配置，也可运行：
+# .venv/bin/python scripts/convert_config.py --source config --output config/local.yaml
+
+# 下载 DocLayout-YOLO ONNX 版面模型（可选，无模型时自动回退几何检测并入复核队列）
+.venv/bin/python scripts/download_layout.py
+```
+
+#### 2. 安装前端依赖并启动服务
+```bash
 npm ci --prefix frontend
 
-# 将非标准配置转换成标准 YAML；不会覆盖已有文件。
-.venv/bin/python scripts/convert_config.py --source config --output config/local.yaml
-.venv/bin/python scripts/download_layout.py
-
-# 分别运行两个终端：
+# 终端 1：启动后端 API
 FIGPRISM_PUBLIC_ORIGIN=http://127.0.0.1:3100 FIGPRISM_COOKIE_SECURE=false \
   .venv/bin/uvicorn figprism.main:app --host 127.0.0.1 --port 8100
+
+# 终端 2：启动前端开发服务器（默认监听 http://127.0.0.1:3100）
 npm run dev --prefix frontend
 ```
 
-配置示例见 `config/settings.example.yaml`。实际 `config/local.yaml`、原始文本配置、管理员凭据及 `data/` 均被 Git 排除。提供的 123 云盘配置中的 `dir` 是网页面包屑，账号已映射到 `paper` 目录；转换器在该映射下使用独立 `/figprism` 子目录。
+#### 3. 创建首个管理员账号
+```bash
+.venv/bin/figprism auth create-admin --username admin
+```
+登录后即可在 `/admin` 页面签发一次性注册邀请码、维护领域词库或触发论文同步任务。
 
-## 生产部署
+---
+
+### 方式二：Docker Compose 部署
 
 ```bash
+# 确保已在 config/local.yaml 中完成生产环境配置
 docker compose build
 docker compose up -d
-# Nginx 初始配置为 deploy/nginx.conf；申请证书后以 /etc/nginx 中的生效配置为准。
-# DNS A: figprism.ai4any.com -> 本机 IPv4。
-```
 
-旧域名跳转配置在 `deploy/nginx.previous.conf` 和 `deploy/nginx.legacy.conf`，其 DNS 记录和 HTTPS 证书保留用于兼容原有链接。
-
-新域名证书使用 Certbot 的 Nginx 插件签发，`certbot.timer` 每日检查续期。可执行 `certbot renew --cert-name figprism.ai4any.com --dry-run` 验证。
-
-为不中断在途入库任务，后端继续使用 Compose 中的原有 `FIGPRISM_PUBLIC_ORIGIN=https://fig.zhcanfly.com`；新域名 Nginx 仅将精确匹配的新站 Origin 转为后端原有可信 Origin，其他来源原样转发并由后端拒绝。该映射与 Compose 配置需配套保留，Cookie 仍在新域名下使用 Secure / HttpOnly。
-
-当前生产 Compose 项目为 `figprism-v2`，容器仅暴露 `127.0.0.1:8101`（API）及 `127.0.0.1:3111`（Web）；Nginx 分别代理，上传上限 52MB，SSE 禁用缓冲。数据库、模型及缓存挂载 `./data`，配置挂载 `./config`。重启策略为 `unless-stopped`，日志自动轮转。
-
-首个管理员通过 CLI 创建（密码交互输入，不放进命令历史）：
-
-```bash
+# 创建首个管理员
 docker compose exec backend figprism auth create-admin --username admin
 ```
 
-本次部署已创建管理员，首次访问资料仅保存在服务器 **`config/admin-access.txt`**，文件权限为 `0600`。不要提交该文件。管理员可在 `/admin` 创建一次性邀请链接。
+`compose.yaml` 默认编排了以下服务：
+- `backend`：FastAPI API 与调度入口（暴露 `127.0.0.1:8101 -> 8100`）
+- `frontend`：Next.js 生产 Web 服务（暴露 `127.0.0.1:3111 -> 3000`）
+- `uploader`：后台异步 WebDAV 资产上传守护进程 (`figprism storage worker`)
+- `coldstart`（可选 `maintenance` profile）：离线/冷启动回填任务容器
 
-## 常用维护
+---
+
+## 🛠️ CLI 常用命令速查
+
+本地环境可使用 `.venv/bin/figprism`，Docker Compose 环境可在命令前加上 `docker compose exec backend`：
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 backend
+# 1. 增量抓取最近 3 天新论文并入库
+figprism sync --source all --days 3 --limit 50
 
-docker compose exec backend figprism sync --source all --days 3 --limit 3
-docker compose exec backend figprism backfill --years 2025,2026 --domains all --limit-per-domain 50
-docker compose exec backend figprism ingest --input https://arxiv.org/abs/2501.00663 --force-include
-# 容器内路径；例如先 docker compose cp paper.pdf backend:/tmp/paper.pdf
-docker compose exec backend figprism ingest --pdf /tmp/paper.pdf --domains memory
+# 2. 按年份与领域批量回填顶会论文
+figprism backfill --years 2025,2026 --domains all --limit-per-domain 50
 
-docker compose exec backend figprism queue list --type review_or_repair --json
-docker compose exec backend figprism recrop --figure-id <id> --page 4 --bbox 0.08,0.12,0.92,0.48 --snap-vector
-docker compose exec backend figprism rebuild-from-webdav
+# 3. 定向入库单篇 arXiv 论文或本地 PDF
+figprism ingest --input https://arxiv.org/abs/2501.00663 --force-include
+figprism ingest --pdf /path/to/paper.pdf --domains memory
 
-systemctl status figprism-sync.timer
-systemctl list-timers figprism-sync.timer
+# 4. 免重切刷新存量图表的三维画风、拓扑与实验排版标签（自动跳过用户手动锁定条目）
+figprism retag-taxonomy --scope all --concurrency 8 --vision-driver openai_mini
+
+# 5. 查看待复核队列与手动指定归一化坐标重切
+figprism queue list --type review_or_repair --json
+figprism recrop --figure-id <id> --page 4 --bbox 0.08,0.12,0.92,0.48 --snap-vector
+
+# 6. 查看并发管线与存储队列状态 / 从 WebDAV 资产全量重建公开图库索引
+figprism pipeline status
+figprism storage status
+figprism rebuild-from-webdav
 ```
 
-每日同步配置在 `deploy/systemd/`，北京时间 06:15 开始（随机延迟最多 5 分钟），每领域最多 3 篇。可在管理界面手动触发更大批次。每次新增领域后，可单独运行对应领域的 backfill；词库编辑会同步到 `config/domains.yaml`。
+---
 
-## 验证
+## 🧪 测试与验证 (Verification)
 
 ```bash
+# 后端单元与集成测试
 .venv/bin/pytest backend/tests -q
+
+# 前端类型检查与生产构建
 npm run typecheck --prefix frontend
 npm run build --prefix frontend
-```
 
-Playwright 测试连接实际服务，使用专门的测试账号（`data/qa/e2e-account.json`，不提交）。运行前执行 `scripts/setup_e2e.py`，浏览器位置由 `PLAYWRIGHT_CHROMIUM_PATH` 指定。真实图表测试需要图库至少一张图。
-
-```bash
+# 端到端浏览器回归（需先初始化 E2E 测试账号并设置浏览器路径）
 .venv/bin/python scripts/setup_e2e.py
-E2E_BASE_URL=https://figprism.ai4any.com npm run test:e2e --prefix frontend
+npm run test:e2e --prefix frontend
 ```
 
-## 运行边界
+---
 
-- 自动识别不保证每张图都完美。低置信度、几何兜底或模型拒绝的结果标为“待复核”，支持手动重切；组合图保持整体，并为可靠识别的子图提供独立聚光灯。
-- 450 DPI 渲染设有 2400 万像素安全上限；超大原图适当降低光栅分辨率，矢量 PDF 不受影响。EPS 源资产暂不转换，回退到论文 PDF 矢量裁切。源码宏解析覆盖常见 `input/include`、figure、includegraphics、subfigure 与 TikZ，不执行 TeX。
-- 第三方模型必须支持图片与结构化输出；响应不符合约定时保留图表并进入复核队列，不伪造分类成功。`codex_subagent` 模式只导出队列，实际 Codex 精修由外部任务领取；本服务不自行启动 Codex 进程。
-- WebDAV 跨区域上传可能较慢。实现分块传输、重试和逐图发布，不承诺 PRD 中的 1–2 秒远端重切或 500ms 全网首屏指标。断电中的在线任务会标记失败，可重新提交；已有部分图表可继续处理。
-- 首批内容为真实论文，未核验的会议标记保留 Preprint。2025–2026 全量代表作需按需运行 backfill，默认不一次性下载每领域 50 篇。
-- WebDAV 备份覆盖论文/图表元数据及资产；**账号、会话、私有看板和历史只在 SQLite**，迁移时还需安全备份数据库与 `config/local.yaml`。不要只依赖资产重建恢复账号。
+## 📖 项目结构与文档
 
-## 分阶段并发控制
-
-`config/local.yaml` 的 `pipeline` 段控制以下共享限额，示例见 `config/settings.example.yaml`：
-
-| 阶段 | 默认并发 |
-| --- | ---: |
-| 元数据召回、会议核验 | 4 |
-| PDF / TeX 下载 | 3 |
-| 同时处理论文 | 2 |
-| PDF 计算子进程 | 2（每进程 1 个 ONNX 线程） |
-| 视觉判图请求 | 3 |
-| WebDAV 上传请求 | 4 |
-| 全局在途图表 | 6（每篇最多 3 张） |
-
-网页、CLI 和定时任务通过共享数据卷中的内核文件锁使用同一套限额。PDF 原文上传与版面分析重叠，图表渲染、判图、上传交错执行；公开图表前等待原文和该图全部资产持久化。相同 PDF/论文身份串行去重；重切只锁目标图表；WebDAV 元数据备份按论文串行并合并重复快照。恢复全库时使用独占维护锁。
-
-arXiv 起始请求间隔跨进程保持至少 3 秒。瞬时网络错误及 408/425/429/5xx 按有限次数重试并尊重 Retry-After；权限错误直接失败。取消任务会终止计算子进程，保留已发布图表；重新提交失败论文时跳过已有图表，不会重复插入。网页最多接纳 12 个顶层待处理任务，每用户仍限 3 个。
-
-管理员页面显示每阶段实时运行数和上限，也可运行：
-
-```bash
-docker compose exec backend figprism pipeline status
+```text
+FigPrism/
+├── AGENTS.md                        # 全局工程守则、配色红线与 3 步增量开发闭环
+├── compose.yaml                     # Docker Compose 生产编排 (backend / frontend / uploader)
+├── backend/
+│   ├── figprism/                    # FastAPI 服务、TeX/PDF 切图、OKLab/OKLCH 配色、并发与存储引擎
+│   ├── prompts/                     # VLM 视觉审美分类 System Prompt 与 JSON Schema
+│   └── tests/                       # 后端单元与集成测试
+├── frontend/
+│   ├── src/                         # Next.js 16 App Router、图组胶片流、检视器与工作台组件
+│   └── tests/                       # Playwright E2E 回归测试
+├── config/
+│   ├── domains.yaml                 # 6 大前沿 AI 领域动态词库
+│   └── settings.example.yaml        # 配置文件示例
+└── docs/
+    ├── PRD.md                       # 唯一全局产品与技术规格真相源
+    ├── implementation.md            # 架构实现细节、安全边界与并发验收记录
+    └── specs/                       # 编号增量规格单 (001 ~ 015 + _template.md)
 ```
-
-调整 `pipeline` 后，应在任务结束后重启后端，并重启/重新运行正在使用旧配置的 CLI 或定时任务，保证所有进程使用一致的限额。CPU 渲染使用独立短生命周期进程，避免 PyMuPDF 在线程之间共享对象；进程启动有少量开销，但内存可随计算完成释放。
-
-可用 `.venv/bin/python scripts/benchmark_pipeline.py` 运行不访问外网的调度基准。固定模拟延迟下，3 篇 / 18 张图的单路模式为 5.95 秒，新并发配置为 2.54 秒，约 2.34 倍；这不是生产网络吞吐保证。
-
-技术依据及第三方组件见 [docs/implementation.md](docs/implementation.md)。
-
-首批真实论文导入由本机 `figprism-bootstrap.service` 托管，可用 `journalctl -u figprism-bootstrap -f` 查看进度。它不影响浏览；远端资产成功保存后，图表逐张出现在首页。该一次性导入结束后无需常驻，日常更新由上述 timer 承担。
-
-
-## 论文图组（PRD v2.1）
-
-首页默认 Deck：每张卡片对应一篇论文，胶片条悬停即可切换主图、图号和配色，点击任意图进入检视器；卡片可原地展开为两列图表。Swimlane 按论文横排展示 210px 高图表，支持横向滚轮/拖拽及整组收藏。Flat 保留单图瀑布流。视图选择保存到 localStorage。
-
-`GET /api/figures/feed?group_by=paper` 先应用所有筛选条件，再在 SQL 层按论文分页（默认 16 组）；返回 `paper`、`hero_figure_id`、自然图号排序的 `matched_figures`。代表图优先级为 Pipeline / Framework、Teaser、Micro-Mechanism、实验图。`group_by=none` 按单图分页，旧 `/api/figures` 保持兼容。`GET /api/papers/{id}/figures` 支持同样的筛选参数，并返回匹配数和同文总数；不传筛选时仍返回全部。同文导航默认沿用进入弹窗时的筛选，可明确切换到同文全部图表；批量收藏接口检查看板所有者并保留已有笔记。
-
-护眼融合使用显示层 `mix-blend-mode: multiply` 和 `contrast(1.02)`，原始 WebP / PDF 文件、导出色值和离屏取色 canvas 都不变。图片装裱区固定使用暖灰褐色 `#E6E2DA`（与检视画布一致），不再提供纸感或纯白背景切换，旧版关闭偏好也不会改变显示。
-
-本次 v2.1 使用并行实例发布，旧 `figprism` 容器继续处理切换前已接受的任务；新流量进入 `figprism-v2`。`figprism-drain-legacy.timer` 每两分钟检查一次，确认没有在途/排队任务和附加计算进程后，才停止记录中的旧容器。它不会删除数据库、资产或容器日志。`data/.pipeline/recovery-exempt.json` 在此期间保护旧任务及批次子任务，避免新实例启动时将它们误标为失败；旧运行环境回收后自动移除。
-
-
-检视器切图会保留工作台和已显示图像，解码后的缩略预览与高清图逐级替换，相邻高清资源会提前缓存。缩略阶段暂不启用吸管；高清就绪后，从原始图像向离屏 1×1 canvas 采样，放大镜同样取原始图像区域，避免为每张超大图长期复制一整块像素画布。默认同文导航与 Feed 的方法/数据等筛选一致，全部模式会标注其他类型与未命中项。 高清加载提示位于画布上方正中，带较大字号和加载动画；超过约 150ms 才显示，快速缓存命中不会闪现提示。

@@ -1,0 +1,112 @@
+{
+  "name": "figprism_isolated_taxonomy",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "macro_category": {
+        "type": "string",
+        "enum": ["method", "data_chart", "case_study"]
+      },
+      "sub_type": {
+        "type": "string",
+        "enum": [
+          "concept_teaser",
+          "system_pipeline",
+          "micro_mechanism",
+          "line_scaling",
+          "bar_ablation",
+          "scatter_pareto",
+          "radar_polar",
+          "distribution_density",
+          "heatmap_matrix",
+          "qualitative_case"
+        ]
+      },
+      "primary_style": {
+        "type": ["string", "null"],
+        "enum": [
+          "plain_wireframe",
+          "clean_iconic",
+          "refined_gradient",
+          "dense_panoramic",
+          "bold_contrast",
+          "tensor_schematic",
+          "isometric_3d",
+          "editorial_minimal",
+          null
+        ]
+      },
+      "secondary_style": {
+        "type": ["string", "null"],
+        "enum": [
+          "plain_wireframe",
+          "clean_iconic",
+          "refined_gradient",
+          "dense_panoramic",
+          "bold_contrast",
+          "tensor_schematic",
+          "isometric_3d",
+          "editorial_minimal",
+          null
+        ]
+      },
+      "layout_topology": {
+        "type": ["string", "null"],
+        "enum": [
+          "linear_pipeline",
+          "macro_zoom_in",
+          "ab_comparison",
+          "modular_swimlane",
+          "cyclic_loop",
+          "branching_tree",
+          null
+        ]
+      },
+      "craft_badges": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "frozen_trainable_marks",
+            "hybrid_mini_chart",
+            "embedded_prompt_card",
+            "dedicated_legend_box"
+          ]
+        }
+      },
+      "chart_layout": {
+        "type": ["string", "null"],
+        "enum": [
+          "single_plot",
+          "multi_panel_grid",
+          "inset_zoom",
+          "combo_dual_axis",
+          null
+        ]
+      },
+      "crop_ok": {
+        "type": "boolean"
+      },
+      "style_confidence": {
+        "type": "number"
+      },
+      "style_reason": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "macro_category",
+      "sub_type",
+      "primary_style",
+      "secondary_style",
+      "layout_topology",
+      "craft_badges",
+      "chart_layout",
+      "crop_ok",
+      "style_confidence",
+      "style_reason"
+    ],
+    "additionalProperties": false
+  }
+}

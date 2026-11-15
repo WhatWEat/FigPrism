@@ -173,3 +173,156 @@ def test_sibling_filters_preserve_feed_scope_without_page_truncation(library):
         == 1
     )
     assert library.get("/api/papers/paper-a/figures?view=invalid").status_code == 422
+
+
+def test_isolated_taxonomy_tab_counts_and_cross_category_guard(library):
+    with connect() as db:
+        db.execute(
+            """UPDATE figures
+               SET primary_style='clean_iconic',
+                   secondary_style='refined_gradient',
+                   layout_topology='ab_comparison',
+                   craft_badges_json='["dedicated_legend_box"]'
+               WHERE id='a1'"""
+        )
+        db.execute(
+            """UPDATE figures
+               SET primary_style='plain_wireframe',
+                   layout_topology='linear_pipeline',
+                   craft_badges_json='["frozen_trainable_marks","hybrid_mini_chart"]'
+               WHERE id='a2'"""
+        )
+        db.execute(
+            """UPDATE figures
+               SET sub_type='line_scaling', chart_layout='multi_panel_grid'
+               WHERE id='a10'"""
+        )
+        db.execute(
+            """UPDATE figures
+               SET sub_type='bar_ablation', chart_layout='single_plot'
+               WHERE id='b1'"""
+        )
+
+    # Unfiltered common scope: 5 non-case figures (2 method in paper-a, 3 data_chart across paper-a/b/c)
+    all_feed = library.get("/api/figures/feed?macro_category=all").json()
+    assert all_feed["tab_counts"] == {
+        "all": {"papers": 3, "figures": 5},
+        "method": {"papers": 1, "figures": 2},
+        "data_chart": {"papers": 3, "figures": 3},
+    }
+
+    # Selecting method + subtype/style narrows items, while tab_counts remain fixed for the common filters!
+    method_styled = library.get(
+        "/api/figures/feed?macro_category=method&visual_style=refined_gradient&chart_type=bar_ablation&chart_layout=single_plot"
+    ).json()
+    assert method_styled["total_figures"] == 1
+    assert method_styled["items"][0]["matched_figures"][0]["id"] == "a1"
+    assert method_styled["items"][0]["matched_figures"][0]["craft_badges"] == [
+        "dedicated_legend_box"
+    ]
+    assert method_styled["tab_counts"] == all_feed["tab_counts"]
+
+    # Craft filter & topology filter on method
+    method_craft = library.get(
+        "/api/figures/feed?macro_category=method&topology=linear_pipeline&craft=frozen_trainable_marks"
+    ).json()
+    assert method_craft["total_figures"] == 1
+    assert method_craft["items"][0]["matched_figures"][0]["id"] == "a2"
+
+    # Selecting data_chart ignores stale method params completely
+    data_filtered = library.get(
+        "/api/figures/feed?macro_category=data_chart&chart_layout=multi_panel_grid&method_type=concept_teaser&visual_style=clean_iconic"
+    ).json()
+    assert data_filtered["total_figures"] == 1
+    assert data_filtered["items"][0]["matched_figures"][0]["id"] == "a10"
+    assert data_filtered["tab_counts"] == all_feed["tab_counts"]
+
+    # Common domain filter updates all three tab_counts buckets independently
+    memory_feed = library.get(
+        "/api/figures/feed?domain=memory&macro_category=data_chart"
+    ).json()
+    assert memory_feed["tab_counts"] == {
+        "all": {"papers": 2, "figures": 4},
+        "method": {"papers": 1, "figures": 2},
+        "data_chart": {"papers": 2, "figures": 2},
+    }
+
+
+@pytest.mark.anyio
+async def test_manual_patch_locks_taxonomy_and_retag_skips_locked(library, monkeypatch):
+    from PIL import Image
+    import io
+    from figprism import ingest
+    from figprism.vision import Verdict
+
+    async def noop_backup(pid):
+        return None
+
+    monkeypatch.setattr(ingest, "backup", noop_backup)
+
+    create_user("editor", "long-enough-password")
+    library.post(
+        "/api/auth/login",
+        json={"username": "editor", "password": "long-enough-password"},
+    )
+    # Manually change a1 (method) to data_chart -> clears method styles & sets taxonomy_locked = 1
+    patched = library.patch(
+        "/api/figures/a1",
+        json={
+            "macro_category": "data_chart",
+            "sub_type": "radar_polar",
+            "primary_style": "clean_iconic",
+            "chart_layout": "single_plot",
+        },
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["macro_category"] == "data_chart"
+    assert body["sub_type"] == "radar_polar"
+    assert body["archetype"] == "Scatter/Radar"
+    assert body["primary_style"] is None
+    assert body["craft_badges"] == []
+    assert body["chart_layout"] == "single_plot"
+    assert body["taxonomy_locked"] == 1
+
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (240, 240, 240)).save(buf, "WEBP")
+    thumb_bytes = buf.getvalue()
+
+    async def fake_get(self, remote):
+        return thumb_bytes
+
+    async def fake_judge(
+        image, caption, domains=None, driver=None, use_stage=True, **kwargs
+    ):
+        return Verdict(
+            macro_category="method",
+            sub_type="micro_mechanism",
+            primary_style="tensor_schematic",
+            layout_topology="macro_zoom_in",
+            craft_badges=["frozen_trainable_marks"],
+            style_confidence=0.93,
+            style_reason="Matrix schematic operator",
+        )
+
+    monkeypatch.setattr(ingest.Storage, "get", fake_get)
+    monkeypatch.setattr(ingest, "judge", fake_judge)
+
+    stats = await ingest.retag_taxonomy(
+        scope="all", concurrency=2, vision_driver="openai_mini"
+    )
+    assert stats["updated"] == 5 and stats["failed"] == 0
+
+    # Locked figure a1 remains untouched; unlocked figure a2 got the new VLM taxonomy
+    after_a1 = library.get("/api/figures/a1").json()
+    assert after_a1["macro_category"] == "data_chart"
+    assert after_a1["sub_type"] == "radar_polar"
+    assert after_a1["taxonomy_locked"] == 1
+
+    after_a2 = library.get("/api/figures/a2").json()
+    assert after_a2["macro_category"] == "method"
+    assert after_a2["sub_type"] == "micro_mechanism"
+    assert after_a2["primary_style"] == "tensor_schematic"
+    assert after_a2["layout_topology"] == "macro_zoom_in"
+    assert after_a2["craft_badges"] == ["frozen_trainable_marks"]
+    assert after_a2["taxonomy_locked"] == 0

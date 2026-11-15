@@ -1,4 +1,5 @@
 "use client";
+import { loadDecodedImage } from "@/lib/decoded-image-cache";
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import {
@@ -41,8 +42,17 @@ import {
   PaperGroup,
   Figure,
   Job,
-  archetypes,
-  archetypeNames,
+  TabCounts,
+  methodSubTypes,
+  methodStyles,
+  methodTopologies,
+  methodCrafts,
+  dataChartTypes,
+  dataChartLayouts,
+  subTypeShortNames,
+  styleShortNames,
+  topologyShortNames,
+  chartLayoutShortNames,
 } from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { Logo, Empty, ErrorMessage, Spinner, useUser } from "./ui";
@@ -280,17 +290,29 @@ const hueNames = [
   "品红",
   "玫红",
 ];
+type MacroTab = "all" | "method" | "data_chart";
+const emptyMethodFilters = {
+  method_type: "",
+  visual_style: "",
+  topology: "",
+  craft: [] as string[],
+};
+const emptyDataFilters = {
+  chart_type: "",
+  chart_layout: "",
+};
 const emptyFilters = {
   domain: "",
   venue: "",
   layout: "",
   span: "",
-  archetype: "",
   color: "",
   honors: false,
   show_cases: false,
   sub_tags: [] as string[],
   tag_mode: "any",
+  ...emptyMethodFilters,
+  ...emptyDataFilters,
 };
 function Gallery({
   query,
@@ -309,19 +331,99 @@ function Gallery({
   const user = useUser().data?.user;
   const cache = useQueryClient();
   const [filters, setFilters] = useState(emptyFilters);
-  const [view, setView] = useState("all");
+  const [macroCategory, setMacroCategory] = useState<MacroTab>("all");
   const [sort, setSort] = useState("newest");
   const [expanded, setExpanded] = useState(true);
+  const [craftOpen, setCraftOpen] = useState(false);
+  const [urlHydrated, setUrlHydrated] = useState(false);
+  const [lastTabCounts, setLastTabCounts] = useState<TabCounts | null>(null);
   const [debounced, setDebounced] = useState(query);
+  const craftRef = useRef<HTMLDivElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("q");
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
     if (q) setQuery(q);
+    const rawMacro = params.get("macro_category") || params.get("view") || "all";
+    const initialMacro: MacroTab =
+      rawMacro === "method"
+        ? "method"
+        : rawMacro === "data_chart" || rawMacro === "data"
+          ? "data_chart"
+          : "all";
+    setMacroCategory(initialMacro);
+    setFilters((prev) => ({
+      ...prev,
+      domain: params.get("domain") || "",
+      venue: params.get("venue") || "",
+      layout: params.get("layout") || "",
+      span: params.get("span") || "",
+      color: params.get("color") || "",
+      honors: params.get("honors") === "true",
+      show_cases: params.get("show_cases") === "true",
+      sub_tags: (params.get("sub_tags") || "").split("|").filter(Boolean),
+      ...(initialMacro === "method"
+        ? {
+            method_type: params.get("method_type") || "",
+            visual_style: params.get("visual_style") || "",
+            topology: params.get("topology") || "",
+            craft: (params.get("craft") || "").split("|").filter(Boolean),
+          }
+        : emptyMethodFilters),
+      ...(initialMacro === "data_chart"
+        ? {
+            chart_type: params.get("chart_type") || "",
+            chart_layout: params.get("chart_layout") || "",
+          }
+        : emptyDataFilters),
+    }));
+    setUrlHydrated(true);
   }, []);
+  useEffect(() => {
+    if (!craftOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (craftRef.current && !craftRef.current.contains(e.target as Node)) {
+        setCraftOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [craftOpen]);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query), 250);
     return () => clearTimeout(t);
   }, [query]);
+  useEffect(() => {
+    if (!urlHydrated) return;
+    const urlParams = new URLSearchParams();
+    if (debounced) urlParams.set("q", debounced);
+    if (macroCategory !== "all") urlParams.set("macro_category", macroCategory);
+    if (filters.domain) urlParams.set("domain", filters.domain);
+    if (filters.venue) urlParams.set("venue", filters.venue);
+    if (filters.layout) urlParams.set("layout", filters.layout);
+    if (filters.span) urlParams.set("span", filters.span);
+    if (filters.color) urlParams.set("color", filters.color);
+    if (filters.honors) urlParams.set("honors", "true");
+    if (filters.show_cases) urlParams.set("show_cases", "true");
+    if (filters.sub_tags.length)
+      urlParams.set("sub_tags", filters.sub_tags.join("|"));
+    if (macroCategory === "method") {
+      if (filters.method_type) urlParams.set("method_type", filters.method_type);
+      if (filters.visual_style)
+        urlParams.set("visual_style", filters.visual_style);
+      if (filters.topology) urlParams.set("topology", filters.topology);
+      if (filters.craft.length) urlParams.set("craft", filters.craft.join("|"));
+    } else if (macroCategory === "data_chart") {
+      if (filters.chart_type) urlParams.set("chart_type", filters.chart_type);
+      if (filters.chart_layout)
+        urlParams.set("chart_layout", filters.chart_layout);
+    }
+    const qs = urlParams.toString();
+    const nextHref = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    if (nextHref !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", nextHref);
+    }
+  }, [urlHydrated, debounced, macroCategory, filters]);
   const domains = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<Domain[]>("/domains"),
@@ -336,29 +438,67 @@ function Gallery({
         updated_at: string | null;
       }>("/stats"),
   });
-  const parameters = new URLSearchParams({
+  const apiParamsObj: Record<string, string> = {
     group_by: ui.viewMode === "flat" ? "none" : "paper",
     limit: ui.viewMode === "flat" ? "24" : "16",
     q: debounced,
-    view,
+    macro_category: macroCategory,
     sort,
-    ...Object.fromEntries(
-      Object.entries(filters).map(([k, v]) => [
-        k,
-        Array.isArray(v) ? v.join("|") : String(v),
-      ]),
-    ),
-  }).toString();
+    domain: filters.domain,
+    venue: filters.venue,
+    layout: filters.layout,
+    span: filters.span,
+    color: filters.color,
+    honors: String(filters.honors),
+    show_cases: String(filters.show_cases),
+    sub_tags: filters.sub_tags.join("|"),
+    tag_mode: filters.tag_mode,
+  };
+  if (macroCategory === "method") {
+    if (filters.method_type) apiParamsObj.method_type = filters.method_type;
+    if (filters.visual_style) apiParamsObj.visual_style = filters.visual_style;
+    if (filters.topology) apiParamsObj.topology = filters.topology;
+    if (filters.craft.length) apiParamsObj.craft = filters.craft.join("|");
+  } else if (macroCategory === "data_chart") {
+    if (filters.chart_type) apiParamsObj.chart_type = filters.chart_type;
+    if (filters.chart_layout) apiParamsObj.chart_layout = filters.chart_layout;
+  }
+  const parameters = new URLSearchParams(apiParamsObj).toString();
+  const inspectorDetail =
+    macroCategory === "method"
+      ? [
+          subTypeShortNames[filters.method_type],
+          styleShortNames[filters.visual_style],
+          topologyShortNames[filters.topology],
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : macroCategory === "data_chart"
+        ? [
+            subTypeShortNames[filters.chart_type],
+            chartLayoutShortNames[filters.chart_layout],
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : "";
   const inspectorLabel =
-    view === "method"
-      ? "方法架构图"
-      : view === "data"
-        ? "数据实验图"
-        : filters.archetype
-          ? archetypeNames[filters.archetype] || filters.archetype
-          : "当前筛选";
-  const openFigure = (id: string) =>
+    macroCategory === "method"
+      ? inspectorDetail
+        ? `方法架构图 · ${inspectorDetail}`
+        : "方法架构图"
+      : macroCategory === "data_chart"
+        ? inspectorDetail
+          ? `数据实验图 · ${inspectorDetail}`
+          : "数据实验图"
+        : "当前筛选";
+  const openFigure = (id: string) => {
+    const figure = items.find((item) => item.id === id);
+    if (figure) {
+      cache.setQueryData(["figure", id], figure);
+      void loadDecodedImage(figure.hd_url).catch(() => {});
+    }
     ui.select(id, { feedQuery: parameters, feedLabel: inspectorLabel });
+  };
   const result = useInfiniteQuery({
     queryKey: ["figures", parameters],
     initialPageParam: 0,
@@ -366,6 +506,11 @@ function Gallery({
       api<FeedPage>(`/figures/feed?${parameters}&offset=${pageParam}`),
     getNextPageParam: (last) => last.next_offset ?? undefined,
   });
+  const liveTabCounts = result.data?.pages[0]?.tab_counts;
+  useEffect(() => {
+    if (liveTabCounts) setLastTabCounts(liveTabCounts);
+  }, [liveTabCounts]);
+  const tabCounts = liveTabCounts ?? lastTabCounts;
   const loaded =
     result.data?.pages.flatMap((p) => p.items as (Figure | PaperGroup)[]) || [];
   const groups =
@@ -408,17 +553,27 @@ function Gallery({
   ) {
     setFilters((f) => ({ ...f, [key]: value }));
   }
+  function switchMacroTab(next: MacroTab) {
+    setMacroCategory(next);
+    setCraftOpen(false);
+    setFilters((f) => ({
+      ...f,
+      ...emptyMethodFilters,
+      ...emptyDataFilters,
+    }));
+  }
   const active =
     Object.entries(filters).some(
       ([k, v]) => k !== "tag_mode" && (Array.isArray(v) ? v.length : !!v),
     ) ||
     query ||
-    view !== "all";
+    macroCategory !== "all";
   const domain = domains.data?.find((d) => d.slug === filters.domain);
   function reset() {
     setFilters(emptyFilters);
     setQuery("");
-    setView("all");
+    setMacroCategory("all");
+    setCraftOpen(false);
   }
   return (
     <>
@@ -622,34 +777,45 @@ function Gallery({
         )}
       </section>
       <div className="gallery-toolbar">
-        <div className="view-tabs">
+        <div className="view-tabs" role="group" aria-label="图表大类视图">
           <button
-            className={view === "all" ? "active" : ""}
-            onClick={() => {
-              setView("all");
-              set("archetype", "");
-            }}
+            aria-pressed={macroCategory === "all"}
+            className={macroCategory === "all" ? "active" : ""}
+            onClick={() => switchMacroTab("all")}
           >
             <LayoutGrid size={14} />
-            全部精选<span>{result.data?.pages[0]?.total_figures ?? "—"}</span>
+            全部精选
+            <span className="tab-count" data-tab-count="all" aria-hidden="true">
+              {tabCounts?.all.figures ?? "—"}
+            </span>
           </button>
           <button
-            className={view === "method" ? "active" : ""}
-            onClick={() => {
-              setView("method");
-              set("archetype", "");
-            }}
+            aria-pressed={macroCategory === "method"}
+            className={macroCategory === "method" ? "active" : ""}
+            onClick={() => switchMacroTab("method")}
           >
             方法架构图
+            <span
+              className="tab-count"
+              data-tab-count="method"
+              aria-hidden="true"
+            >
+              {tabCounts?.method.figures ?? "—"}
+            </span>
           </button>
           <button
-            className={view === "data" ? "active" : ""}
-            onClick={() => {
-              setView("data");
-              set("archetype", "");
-            }}
+            aria-pressed={macroCategory === "data_chart"}
+            className={macroCategory === "data_chart" ? "active" : ""}
+            onClick={() => switchMacroTab("data_chart")}
           >
             数据实验图
+            <span
+              className="tab-count"
+              data-tab-count="data_chart"
+              aria-hidden="true"
+            >
+              {tabCounts?.data_chart.figures ?? "—"}
+            </span>
           </button>
         </div>
         <div className="gallery-options">
@@ -702,28 +868,217 @@ function Gallery({
           ))}
         </div>
       </div>
-      <div className="archetype-row">
-        <button
-          className={!filters.archetype ? "active" : ""}
-          onClick={() => set("archetype", "")}
-        >
-          所有图表类型
-        </button>
-        {archetypes
-          .filter((a) => a !== "Case Study")
-          .map((a) => (
-            <button
-              key={a}
-              className={filters.archetype === a ? "active" : ""}
-              onClick={() => {
-                set("archetype", a === filters.archetype ? "" : a);
-                setView("all");
-              }}
-            >
-              {archetypeNames[a]}
-            </button>
-          ))}
-      </div>
+      <section
+        className={`taxonomy-panel taxonomy-${macroCategory}`}
+        aria-label="分类细分筛选"
+      >
+        {macroCategory === "method" ? (
+          <>
+            <div className="taxonomy-row">
+              <span className="taxonomy-label">方法类型</span>
+              <div className="taxonomy-chips">
+                <button
+                  className={!filters.method_type ? "active" : ""}
+                  onClick={() => set("method_type", "")}
+                >
+                  全部方法图
+                </button>
+                {methodSubTypes.map((item) => (
+                  <button
+                    key={item.key}
+                    className={filters.method_type === item.key ? "active" : ""}
+                    onClick={() =>
+                      set(
+                        "method_type",
+                        filters.method_type === item.key ? "" : item.key,
+                      )
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="craft-dropdown-wrap" ref={craftRef}>
+                <button
+                  type="button"
+                  className={`craft-trigger ${filters.craft.length ? "active" : ""}`}
+                  aria-expanded={craftOpen}
+                  onClick={() => setCraftOpen((o) => !o)}
+                >
+                  <span>🧩 局部巧思</span>
+                  {filters.craft.length > 0 && (
+                    <em className="craft-count">{filters.craft.length}</em>
+                  )}
+                  <ChevronDown size={13} />
+                </button>
+                {craftOpen && (
+                  <div className="craft-popover" role="group" aria-label="局部巧思筛选">
+                    {methodCrafts.map((item) => {
+                      const checked = filters.craft.includes(item.key);
+                      return (
+                        <label
+                          key={item.key}
+                          className={`craft-option ${checked ? "checked" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              set(
+                                "craft",
+                                checked
+                                  ? filters.craft.filter((x) => x !== item.key)
+                                  : [...filters.craft, item.key],
+                              )
+                            }
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      );
+                    })}
+                    {filters.craft.length > 0 && (
+                      <button
+                        type="button"
+                        className="craft-clear"
+                        onClick={() => set("craft", [])}
+                      >
+                        清空巧思条件
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="taxonomy-row">
+              <span className="taxonomy-label">画风质感</span>
+              <div className="taxonomy-chips">
+                <button
+                  className={!filters.visual_style ? "active" : ""}
+                  onClick={() => set("visual_style", "")}
+                >
+                  全部画风
+                </button>
+                {methodStyles.map((item) => (
+                  <button
+                    key={item.key}
+                    className={
+                      filters.visual_style === item.key ? "active" : ""
+                    }
+                    onClick={() =>
+                      set(
+                        "visual_style",
+                        filters.visual_style === item.key ? "" : item.key,
+                      )
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="taxonomy-row">
+              <span className="taxonomy-label">构图骨架</span>
+              <div className="taxonomy-chips">
+                <button
+                  className={!filters.topology ? "active" : ""}
+                  onClick={() => set("topology", "")}
+                >
+                  全部骨架
+                </button>
+                {methodTopologies.map((item) => (
+                  <button
+                    key={item.key}
+                    className={filters.topology === item.key ? "active" : ""}
+                    onClick={() =>
+                      set(
+                        "topology",
+                        filters.topology === item.key ? "" : item.key,
+                      )
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : macroCategory === "data_chart" ? (
+          <>
+            <div className="taxonomy-row">
+              <span className="taxonomy-label">实验图类型</span>
+              <div className="taxonomy-chips">
+                <button
+                  className={!filters.chart_type ? "active" : ""}
+                  onClick={() => set("chart_type", "")}
+                >
+                  全部实验图
+                </button>
+                {dataChartTypes.map((item) => (
+                  <button
+                    key={item.key}
+                    className={filters.chart_type === item.key ? "active" : ""}
+                    onClick={() =>
+                      set(
+                        "chart_type",
+                        filters.chart_type === item.key ? "" : item.key,
+                      )
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="taxonomy-row">
+              <span className="taxonomy-label">排版形态</span>
+              <div className="taxonomy-chips">
+                <button
+                  className={!filters.chart_layout ? "active" : ""}
+                  onClick={() => set("chart_layout", "")}
+                >
+                  全部排版
+                </button>
+                {dataChartLayouts.map((item) => (
+                  <button
+                    key={item.key}
+                    className={
+                      filters.chart_layout === item.key ? "active" : ""
+                    }
+                    onClick={() =>
+                      set(
+                        "chart_layout",
+                        filters.chart_layout === item.key ? "" : item.key,
+                      )
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="taxonomy-guide">
+            <span className="taxonomy-guide-text">
+              按图表使命分流精筛 · 方法图拆解<strong>画风 × 骨架 × 巧思</strong>，实验图细分<strong>统计图形 × 子图排版</strong>
+            </span>
+            <div className="taxonomy-guide-actions">
+              <button
+                type="button"
+                onClick={() => switchMacroTab("method")}
+              >
+                进入方法架构图精筛 <ArrowRight size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMacroTab("data_chart")}
+              >
+                进入数据实验图精筛 <ArrowRight size={13} />
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
       {/^https:\/\/(arxiv.org|huggingface.co|openreview.net)/.test(query) && (
         <div className="search-suggestion">
           <LinkIcon />

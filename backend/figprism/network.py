@@ -14,6 +14,7 @@ HOSTS = {
     "api2.openreview.net",
     "dblp.org",
     "api.openalex.org",
+    "openaccess.thecvf.com",
 }
 
 
@@ -27,7 +28,7 @@ async def fetch(url, max_bytes=None, budget="download"):
             or parsed.username
             or parsed.port not in (None, 443)
         ):
-            raise ValueError("仅支持 arXiv、Hugging Face 与 OpenReview 官方论文链接")
+            raise ValueError("仅支持白名单内的学术论文官方链接")
 
         async def request():
             async with stage(budget):

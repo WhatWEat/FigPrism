@@ -11,6 +11,7 @@ from .ingest import (
     resolve,
     recrop as do_recrop,
     rebuild,
+    retag_taxonomy as do_retag_taxonomy,
     new_job,
     update_job,
 )
@@ -22,6 +23,8 @@ app = typer.Typer(help="FigPrism research figure pipeline")
 auth = typer.Typer()
 queue = typer.Typer()
 pipeline = typer.Typer()
+storage = typer.Typer()
+app.add_typer(storage, name="storage")
 app.add_typer(pipeline, name="pipeline")
 app.add_typer(auth, name="auth")
 app.add_typer(queue, name="queue")
@@ -112,21 +115,42 @@ def backfill(
     domains: str = "all",
     limit_per_domain: int = 50,
     vision_driver: str | None = None,
+    source: str = "all",
 ):
-    typer.echo(
-        json.dumps(
-            asyncio.run(
-                do_sync(
-                    backfill=True,
-                    years=tuple(map(int, years.split(","))),
-                    domain=domains,
-                    limit=limit_per_domain,
-                    vision_driver=vision_driver,
-                )
-            ),
-            ensure_ascii=False,
+    payload = {
+        "years": list(map(int, years.split(","))),
+        "domain": domains,
+        "limit": limit_per_domain,
+        "source": source,
+        "worker_owner": os.environ.get("HOSTNAME", ""),
+    }
+    jid = new_job(None, "backfill", payload)
+    typer.echo(json.dumps({"job_id": jid, **payload}, ensure_ascii=False))
+
+    async def run_backfill():
+        import signal
+
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        loop.add_signal_handler(signal.SIGTERM, task.cancel)
+        return await do_sync(
+            backfill=True,
+            years=tuple(payload["years"]),
+            domain=domains,
+            limit=limit_per_domain,
+            source=source,
+            vision_driver=vision_driver,
+            job_id=jid,
         )
-    )
+
+    try:
+        result = asyncio.run(run_backfill())
+        typer.echo(json.dumps(result, ensure_ascii=False))
+        if result["completed"] == 0 and (result["failed"] or result["source_errors"]):
+            raise typer.Exit(1)
+    except Exception as exc:
+        update_job(jid, 0, error_message(exc), "failed")
+        raise
 
 
 @queue.command("list")
@@ -153,6 +177,31 @@ def rebuild_from_webdav():
     typer.echo(f"Restored {asyncio.run(rebuild())} figures")
 
 
+@app.command("retag-taxonomy")
+def retag_taxonomy(
+    scope: str = typer.Option("all", "--scope"),
+    concurrency: int = typer.Option(8, "--concurrency", min=1, max=32),
+    vision_driver: str = typer.Option("openai_mini", "--vision-driver"),
+):
+    def _progress(s: dict):
+        done = s["updated"] + s["failed"]
+        if done and (done % 20 == 0 or done == s["total"]):
+            typer.echo(
+                f"[retag] {done}/{s['total']} (updated={s['updated']}, failed={s['failed']})",
+                err=True,
+            )
+
+    result = asyncio.run(
+        do_retag_taxonomy(
+            scope=scope,
+            concurrency=concurrency,
+            vision_driver=vision_driver,
+            on_progress=_progress,
+        )
+    )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @pipeline.command("status")
 def pipeline_status():
     from .concurrency import snapshot
@@ -167,6 +216,29 @@ def pipeline_status():
             indent=2,
         )
     )
+
+
+@storage.command("status")
+def storage_status():
+    from .uploads import status
+
+    typer.echo(json.dumps(status(), ensure_ascii=False, indent=2))
+
+
+@storage.command("worker")
+def storage_worker():
+    import logging
+    from .uploads import worker
+
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(worker())
+
+
+@storage.command("maintain")
+def storage_maintain():
+    from .maintenance import audit
+
+    typer.echo(json.dumps(asyncio.run(audit()), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
