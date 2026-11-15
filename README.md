@@ -2,9 +2,9 @@
 
 # FigPrism
 
-### 以学术图表为一等公民的顶会科研绘图审美、构图拆解与配色灵感平台
+### 顶会论文配图图库、画风构图拆解与科研配色灵感站
 
-**A Figure-First Research Gallery & Aesthetic Deconstruction Workspace for AI / ML Papers**
+**A Curated Gallery & Aesthetic Breakdown for AI / ML Paper Figures**
 
 [![Live Site](https://img.shields.io/badge/Live_Demo-figprism.ai4any.com-3730a3?style=for-the-badge)](https://figprism.ai4any.com)
 [![GitHub](https://img.shields.io/badge/GitHub-WhatWEat%2FFigPrism-181615?style=for-the-badge&logo=github)](https://github.com/WhatWEat/FigPrism)
@@ -19,12 +19,15 @@
 
 ---
 
-写论文画图没灵感、配完色总觉得发脏、在几百页 PDF 里反复翻找高颜值架构图与 Scaling Curve？
+写论文画图找不到好看的参考、配完色总觉得发灰发脏、想找张高颜值架构图或实验图却要在几十篇 PDF 里一页页翻？
 
-**FigPrism** 是一个专为 AI / ML 研究者打造的**「以科研图表为一等公民（Figure-First）」**审美与检索平台：自动从 `arXiv`、`Hugging Face Daily Papers`、`OpenReview`、`DBLP` 与 `CVF Open Access` 收集顶会论文，抽取出**高保真矢量切片与 450 DPI 超清图表**，通过视觉大模型完成**方法架构画风 × 空间拓扑骨架 × 局部巧思**与**实验图表排版**结构化拆解，并在感知均匀的 **OKLab / OKLCH** 空间提取「浅色填充 + 同色相深色描边」成对科研配色，支持一键导出 `Matplotlib` / `LaTeX xcolor` / `CSS`。
+**FigPrism** 直接把顶会论文里的图表摊开展示并拆解好——自动收录 `arXiv`、`Hugging Face Daily Papers`、`OpenReview`、`DBLP` 与 `CVF Open Access` 的热门及录用论文，精准裁出矢量切片和 450 DPI 超清大图：
 
-> ✨ 无需登录即可直接浏览公开图库、三维精细筛选、像素级吸管取色、导出配色代码与下载矢量 PDF / TikZ 源码。
-> 🤖 本项目全栈由 **Gemini Carbon（产品设计与增量 PRD）× Codex（代码实现、容器发布与端到端回归）** 双 Agent 闭环协作打造。
+- **按画风与构图找参考**：方法图自动标注「画风 × 空间骨架 × 局部巧思」，实验图按统计图形与排版细分，照着你想画的风格一秒筛出对照样本；
+- **直接抄成套科研配色**：自动剔除白底与坐标轴黑灰，在 OKLab / OKLCH 空间提取「浅填充 + 同色深描边」成对色板，支持一键导出 `Matplotlib` / `LaTeX xcolor` / `CSS`。
+
+> ✨ 无需登录即可直接浏览全部图表、精细筛选、像素吸管取色、导出配色代码并下载矢量 PDF / TikZ 源码。
+> 🤖 本项目全栈采用 **Gemini Carbon（需求拆解与增量 PRD）× Codex（代码实现、容器发布与端到端回归）** 双 Agent 闭环开发。
 
 ---
 
@@ -54,12 +57,12 @@
 
 ### 3. 🎨 OKLab/OKLCH 科研级深浅配对取色 & 离屏原色吸管
 - **精准剥离背景噪音**：自动过滤论文白底与坐标轴中性灰，在 `OKLab` 感知均匀空间聚类出主导色，并按 `OKLCH` 明度与色相角自动配对**浅色填充 (`Fill`) + 同色相深色描边 (`Stroke`)**。
-- **科研工作流一键复制**：色卡支持直接复制 `HEX`、`RGB`、`Matplotlib Python List`、`LaTeX xcolor (\definecolor)` 与 `CSS` 变量。
-- **护眼暖宣纸体系 + 像素级色彩零失真**：全站采用暖燕麦画布（`#EDEAE4`）与象牙米白表面（`#FAF8F5`），图表通过显示层 `multiply` 柔和融纸；详情页放大镜吸管（Loupe Eyedropper）严格从**离屏未混合原始图像**采样，确保取色 100% 忠于原始像素。
+- **配色代码一键复制**：色卡支持直接复制 `HEX`、`RGB`、`Matplotlib Python List`、`LaTeX xcolor (\definecolor)` 与 `CSS` 变量。
+- **护眼暖宣纸体系 + 原图像素级吸管**：全站采用暖燕麦画布（`#EDEAE4`）与象牙米白表面（`#FAF8F5`），图表通过显示层 `multiply` 柔和融纸；详情页放大镜吸管（Loupe Eyedropper）严格从**离屏未混合原始图像**采样，确保取色 100% 忠于原始像素。
 
 ### 4. 🔍 高精度矢量切图 & 交互式检视器 (`Inspector`)
-- **双通道高清提取**：优先解析 `arXiv` TeX 源码包提取原生矢量 PDF 子图与 **TikZ 源码**；无源码时通过 `DocLayout-YOLO` ONNX 神经版面分析 + `PyMuPDF` **矢量路径与非白墨迹包络吸附 (`Vector-Ink Snap`)**，生成最高 `450 DPI` WebP 与局部矢量 PDF 切片。
-- **沉浸式检视体验**：支持滚轮无级缩放与拖拽平移、`(a)(b)(c)` **多子图聚光灯联动**、同篇图表快速切换（支持键盘 `↑ / ↓`），以及登录用户的 **网页端框选重切** 与分类纠错锁定。
+- **双通道高清提取**：优先解析 `arXiv` TeX 源码包提取原生矢量 PDF 子图与 **TikZ 源码**；无源码时通过 `DocLayout-YOLO` ONNX 版面检测 + `PyMuPDF` **矢量路径与非白墨迹包络吸附 (`Vector-Ink Snap`)**，生成最高 `450 DPI` WebP 与局部矢量 PDF 切片。
+- **顺手的看图与重切体验**：支持滚轮无级缩放与拖拽平移、`(a)(b)(c)` **多子图聚光灯联动**、同篇图表快速切换（支持键盘 `↑ / ↓`），以及登录用户的 **网页端框选重切** 与分类纠错锁定。
 
 ### 5. 📚 6 大前沿 AI 领域词库 & 自动顶会核验
 - 内置 6 个持续追踪的 AI 研究领域词库（可在 `/admin` 动态维护并同步到 `config/domains.yaml`）：
