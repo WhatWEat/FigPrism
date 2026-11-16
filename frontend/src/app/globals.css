@@ -4026,12 +4026,16 @@ button:disabled {
 }
 
 /* Spec 012: stable first-frame geometry, current details and direct zoom control. */
-.zoom-rail { position:absolute;left:12px;top:50%;transform:translateY(-50%);z-index:8;display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 5px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:14px;box-shadow:0 3px 14px #18161514; }
-.zoom-rail output { font-size:10px;font-weight:700;min-width:42px;text-align:center;color:var(--text-secondary); }
-.zoom-rail input { writing-mode:vertical-lr;direction:rtl;width:22px;height:150px;accent-color:var(--accent-brand);cursor:ns-resize;touch-action:none; }
-.zoom-rail .icon-button { width:28px;height:26px; }
 .inspector-sidebar .detail-loading { padding:28px;display:flex;flex-direction:column;align-items:flex-start;gap:20px;color:var(--text-secondary); }
 .detail-skeleton { width:100%;height:100px;border-radius:8px;background:var(--bg-subtle); }
 .caption-math { overflow-wrap:anywhere; }
 .caption-math .katex { font-size:1.05em; }
-@media(max-width:700px) { .zoom-rail {left:5px;padding:5px 2px;gap:3px;} .zoom-rail input {height:100px;} }
+
+/* Spec 016: one compact zoom control in the top-right canvas toolbar. */
+.canvas-top { position: relative; z-index: 5; flex-wrap: wrap; }
+.canvas-tools { margin-left: auto; }
+.zoom-controls { display: flex; align-items: center; gap: 4px; }
+.zoom-controls output { width: 44px; text-align: center; font-size: 10px; font-weight: 700; color: var(--text-secondary); }
+.zoom-controls input { width: 100px; height: 24px; margin: 0; accent-color: var(--accent-brand); cursor: ew-resize; touch-action: none; }
+.zoom-controls button { color: var(--text-secondary); }
+@media(max-width:700px) { .zoom-controls { gap: 2px; } .zoom-controls input { width: 64px; } }

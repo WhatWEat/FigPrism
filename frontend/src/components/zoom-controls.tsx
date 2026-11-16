@@ -4,7 +4,7 @@ import {
   MAX_INSPECTOR_ZOOM,
   MIN_INSPECTOR_ZOOM,
 } from "@/lib/use-inspector-viewport";
-export function ZoomRail({
+export function ZoomControls({
   zoom,
   onZoom,
   onFit,
@@ -15,21 +15,17 @@ export function ZoomRail({
 }) {
   const percent = Math.round(zoom * 100);
   return (
-    <div className="zoom-rail" aria-label="画布缩放控制">
+    <div className="zoom-controls" role="group" aria-label="画布缩放控制">
       <button
-        className="icon-button"
-        onClick={() => onZoom(zoom * 1.25)}
-        disabled={zoom >= MAX_INSPECTOR_ZOOM}
-        aria-label="滑条放大"
+        onClick={() => onZoom(zoom - 0.25)}
+        disabled={zoom <= MIN_INSPECTOR_ZOOM}
+        aria-label="缩小"
       >
-        <Plus size={15} />
+        <Minus size={15} />
       </button>
-      <output className="mono" aria-live="off">
-        {percent}%
-      </output>
       <input
         aria-label="缩放倍率"
-        aria-orientation="vertical"
+        aria-orientation="horizontal"
         aria-valuetext={`${percent}%`}
         type="range"
         min={Math.log2(MIN_INSPECTOR_ZOOM)}
@@ -38,18 +34,19 @@ export function ZoomRail({
         value={Math.log2(zoom)}
         onChange={(event) => onZoom(2 ** Number(event.target.value))}
       />
+      <output className="mono" aria-live="off">
+        {percent}%
+      </output>
       <button
-        className="icon-button"
-        onClick={() => onZoom(zoom / 1.25)}
-        disabled={zoom <= MIN_INSPECTOR_ZOOM}
-        aria-label="滑条缩小"
+        onClick={() => onZoom(zoom + 0.25)}
+        disabled={zoom >= MAX_INSPECTOR_ZOOM}
+        aria-label="放大"
       >
-        <Minus size={15} />
+        <Plus size={15} />
       </button>
       <button
-        className="icon-button"
         onClick={onFit}
-        aria-label="重置缩放"
+        aria-label="适应窗口"
         title="适应窗口"
       >
         <Focus size={15} />

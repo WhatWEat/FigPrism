@@ -42,21 +42,21 @@ test("first preview fits the viewport, HD keeps its frame, and zoom reaches 3200
   expect(Math.abs(after.height - before.height)).toBeLessThan(2);
   const slider = page.getByRole("slider", { name: "缩放倍率" });
   await slider.fill("3");
-  await expect(page.locator(".zoom-rail output")).toHaveText("800%");
+  await expect(page.locator(".zoom-controls output")).toHaveText("800%");
   expect((await image.boundingBox())!.width).toBeGreaterThan(
     before.width * 7.9,
   );
   await slider.fill("5");
-  await expect(page.locator(".zoom-rail output")).toHaveText("3200%");
-  await page.getByRole("button", { name: "重置缩放", exact: true }).click();
-  await expect(page.locator(".zoom-rail output")).toHaveText("100%");
+  await expect(page.locator(".zoom-controls output")).toHaveText("3200%");
+  await page.getByRole("button", { name: "适应窗口", exact: true }).click();
+  await expect(page.locator(".zoom-controls output")).toHaveText("100%");
   expect(
     Math.abs((await image.boundingBox())!.width - before.width),
   ).toBeLessThan(2);
   await page.locator(".canvas-scroll").hover();
   await page.mouse.wheel(0, -200);
   await expect
-    .poll(() => page.locator(".zoom-rail output").innerText())
+    .poll(() => page.locator(".zoom-controls output").innerText())
     .not.toBe("100%");
   await page.screenshot({ path: "../data/qa/inspector-012.png" });
 });

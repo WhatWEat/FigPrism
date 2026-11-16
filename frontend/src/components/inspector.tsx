@@ -16,8 +16,6 @@ import {
   Copy,
   Crop,
   ExternalLink,
-  Focus,
-  Minus,
   MousePointer2,
   Pipette,
   Plus,
@@ -48,7 +46,7 @@ import { useInspectorImage } from "@/lib/use-inspector-image";
 import { warmFigureImage } from "@/lib/decoded-image-cache";
 
 import { useInspectorViewport } from "@/lib/use-inspector-viewport";
-import { ZoomRail } from "./zoom-rail";
+import { ZoomControls } from "./zoom-controls";
 import { RichCaption } from "./rich-caption";
 const EMPTY_BOARDS: Board[] = [];
 
@@ -981,7 +979,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                     <ArrowRight size={16} />
                   </button>
                 </div>
-                <div className="capsule">
+                <div className="capsule canvas-tools">
                   <button
                     className={picker ? "active" : ""}
                     onClick={() => {
@@ -995,26 +993,7 @@ export function Inspector({ ids }: { ids: string[] }) {
                     <Pipette size={16} />
                   </button>
                   <i />
-                  <button
-                    onClick={() => applyZoom(zoom - 0.25)}
-                    aria-label="缩小"
-                  >
-                    <Minus size={15} />
-                  </button>
-                  <span className="mono">{Math.round(zoom * 100)}%</span>
-                  <button
-                    onClick={() => applyZoom(zoom + 0.25)}
-                    aria-label="放大"
-                  >
-                    <Plus size={15} />
-                  </button>
-                  <button
-                    onClick={resetZoom}
-                    title="适应窗口"
-                    aria-label="适应窗口"
-                  >
-                    <Focus size={16} />
-                  </button>
+                  <ZoomControls zoom={zoom} onZoom={applyZoom} onFit={resetZoom} />
                 </div>
               </div>
               {!cropping &&
@@ -1060,7 +1039,6 @@ export function Inspector({ ids }: { ids: string[] }) {
                 />
               ) : (
                 <>
-                  <ZoomRail zoom={zoom} onZoom={applyZoom} onFit={resetZoom} />
                   <div
                     ref={attachScroll}
                     className={`canvas-scroll ${canPan ? "pannable" : ""} ${isPanning ? "panning" : ""}`}
