@@ -134,11 +134,11 @@ def register(data: Registration, response: Response):
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         invite = db.execute(
-            "SELECT * FROM invite_codes WHERE code=? AND used_by IS NULL AND expires_at>datetime('now')",
+            "SELECT * FROM invite_codes WHERE code=? AND used_count < max_uses AND expires_at>datetime('now')",
             (data.invite_code,),
         ).fetchone()
         if not invite:
-            raise HTTPException(403, "邀请链接无效或已过期")
+            raise HTTPException(403, "邀请链接无效、已过期或使用次数已用完")
         if db.execute(
             "SELECT id FROM users WHERE username=?", (data.username,)
         ).fetchone():
@@ -148,7 +148,8 @@ def register(data: Registration, response: Response):
             (data.username, hasher.hash(data.password)),
         ).lastrowid
         db.execute(
-            "UPDATE invite_codes SET used_by=? WHERE code=?", (uid, data.invite_code)
+            "UPDATE invite_codes SET used_by=?,used_count=used_count+1 WHERE code=?",
+            (uid, data.invite_code)
         )
     start_session(response, {"id": uid})
     return {"user": {"id": uid, "username": data.username, "role": "user"}}

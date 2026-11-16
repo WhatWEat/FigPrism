@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
  role TEXT NOT NULL CHECK(role IN ('admin','user')), is_active INTEGER NOT NULL DEFAULT 1,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS sessions (jti TEXT PRIMARY KEY, user_id INTEGER REFERENCES users(id), expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS invite_codes (code TEXT PRIMARY KEY, created_by INTEGER REFERENCES users(id), used_by INTEGER REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS invite_codes (code TEXT PRIMARY KEY, created_by INTEGER REFERENCES users(id), used_by INTEGER REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, max_uses INTEGER NOT NULL DEFAULT 1, used_count INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS domains (slug TEXT PRIMARY KEY, config TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS papers (
  id TEXT PRIMARY KEY, doc_uid TEXT UNIQUE NOT NULL, file_sha256 TEXT UNIQUE NOT NULL,
@@ -148,6 +148,12 @@ def init_db(recover_jobs=False, preserve_job_ids=()):
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
+        invite_columns = {r[1] for r in db.execute("PRAGMA table_info(invite_codes)")}
+        if "max_uses" not in invite_columns:
+            db.execute("ALTER TABLE invite_codes ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 1")
+        if "used_count" not in invite_columns:
+            db.execute("ALTER TABLE invite_codes ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0")
+            db.execute("UPDATE invite_codes SET used_count=1 WHERE used_by IS NOT NULL")
         columns = {r[1] for r in db.execute("PRAGMA table_info(figures)")}
         for col_name, col_def in TAXONOMY_COLUMNS:
             if col_name not in columns:

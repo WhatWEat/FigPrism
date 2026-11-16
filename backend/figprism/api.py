@@ -1443,22 +1443,40 @@ def admin_overview(user=Depends(require_admin)):
     }
 
 
+class InviteOptions(BaseModel):
+    max_uses: int = Field(default=1, ge=1, le=1000, strict=True)
+
+
+def invite_info(row):
+    result = dict(row)
+    expired = result["expires_at"] <= datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    result["status"] = "expired" if expired else "exhausted" if result["used_count"] >= result["max_uses"] else "active"
+    result["remaining_uses"] = 0 if expired else max(0, result["max_uses"] - result["used_count"])
+    result["url"] = get_settings().public_origin + "/?invite=" + result["code"]
+    return result
+
+
+@router.get("/admin/invites")
+def list_invites(user=Depends(require_admin)):
+    with connect() as db:
+        return {"items": [invite_info(row) for row in db.execute(
+            "SELECT code,max_uses,used_count,expires_at,created_at FROM invite_codes ORDER BY created_at DESC,rowid DESC LIMIT 20"
+        )]}
+
+
 @router.post("/admin/invites")
-def invite(user=Depends(require_admin)):
+def invite(body: InviteOptions | None = None, user=Depends(require_admin)):
+    max_uses = body.max_uses if body else 1
     code = secrets.token_urlsafe(24)
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
     with connect() as db:
         db.execute(
-            "INSERT INTO invite_codes(code,created_by,expires_at) VALUES(?,?,?)",
-            (code, user["id"], expires),
+            "INSERT INTO invite_codes(code,created_by,expires_at,max_uses) VALUES(?,?,?,?)",
+            (code, user["id"], expires, max_uses),
         )
-    return {
-        "code": code,
-        "url": get_settings().public_origin + "/?invite=" + code,
-        "expires_at": expires,
-    }
+    return invite_info({"code": code, "expires_at": expires, "max_uses": max_uses, "used_count": 0})
 
 
 class UserState(BaseModel):
