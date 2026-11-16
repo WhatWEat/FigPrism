@@ -1444,6 +1444,7 @@ def admin_overview(user=Depends(require_admin)):
 
 
 class InviteOptions(BaseModel):
+    kind: Literal["link", "code"] = "link"
     max_uses: int = Field(default=1, ge=1, le=1000, strict=True)
 
 
@@ -1460,23 +1461,34 @@ def invite_info(row):
 def list_invites(user=Depends(require_admin)):
     with connect() as db:
         return {"items": [invite_info(row) for row in db.execute(
-            "SELECT code,max_uses,used_count,expires_at,created_at FROM invite_codes ORDER BY created_at DESC,rowid DESC LIMIT 20"
+            "SELECT code,kind,max_uses,used_count,expires_at,created_at FROM invite_codes WHERE deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 20"
         )]}
 
 
 @router.post("/admin/invites")
 def invite(body: InviteOptions | None = None, user=Depends(require_admin)):
     max_uses = body.max_uses if body else 1
-    code = secrets.token_urlsafe(24)
+    kind = body.kind if body else "link"
+    code = ("".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(16))
+            if kind == "code" else secrets.token_urlsafe(24))
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
     with connect() as db:
         db.execute(
-            "INSERT INTO invite_codes(code,created_by,expires_at,max_uses) VALUES(?,?,?,?)",
-            (code, user["id"], expires, max_uses),
+            "INSERT INTO invite_codes(code,created_by,expires_at,max_uses,kind) VALUES(?,?,?,?,?)",
+            (code, user["id"], expires, max_uses, kind),
         )
-    return invite_info({"code": code, "expires_at": expires, "max_uses": max_uses, "used_count": 0})
+    return invite_info({"code": code, "kind": kind, "expires_at": expires, "max_uses": max_uses, "used_count": 0})
+
+
+@router.delete("/admin/invites/{code}")
+def delete_invite(code: str, user=Depends(require_admin)):
+    with connect() as db:
+        updated = db.execute("UPDATE invite_codes SET deleted_at=CURRENT_TIMESTAMP WHERE code=? AND deleted_at IS NULL", (code,))
+        if not updated.rowcount:
+            raise HTTPException(404, "邀请不存在或已删除")
+    return {"ok": True}
 
 
 class UserState(BaseModel):

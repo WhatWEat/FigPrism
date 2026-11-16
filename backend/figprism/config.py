@@ -37,6 +37,13 @@ class PipelineConfig(BaseModel):
     arxiv_interval: float = Field(default=3.0, ge=3, le=60)
 
 
+class TurnstileConfig(BaseModel):
+    enabled: bool = False
+    site_key: str = ""
+    secret_key: SecretStr = SecretStr("")
+    allowed_hostnames: list[str] = Field(default_factory=list)
+
+
 class Settings(BaseModel):
     data_dir: Path = ROOT / "data"
     domains_file: Path = ROOT / "config/domains.yaml"
@@ -44,6 +51,7 @@ class Settings(BaseModel):
     public_origin: str = "http://localhost:3000"
     cookie_secure: bool = False
     webdav: WebDAVConfig = Field(default_factory=WebDAVConfig)
+    turnstile: TurnstileConfig = Field(default_factory=TurnstileConfig)
     vision: VisionConfig = Field(default_factory=VisionConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     layout_model: str | None = None

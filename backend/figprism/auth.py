@@ -1,4 +1,5 @@
 import secrets
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from .config import get_settings
 from .db import connect
+from .auth_protection import protect_auth
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 hasher = PasswordHasher()
@@ -16,12 +18,13 @@ DUMMY_HASH = hasher.hash(secrets.token_urlsafe(24))
 
 
 class Credentials(BaseModel):
+    turnstile_token: str = Field(default="", max_length=2048)
     username: str = Field(min_length=2, max_length=64, pattern=r"^[\w.@-]+$")
     password: str = Field(min_length=10, max_length=128)
 
 
 class Registration(Credentials):
-    invite_code: str
+    invite_code: str = Field(min_length=1, max_length=256)
 
 
 def current_user(request: Request):
@@ -90,6 +93,12 @@ def start_session(response, user):
     )
 
 
+@router.get("/challenge-config")
+def challenge_config():
+    config = get_settings().turnstile
+    return {"enabled": config.enabled, "site_key": config.site_key if config.enabled else None}
+
+
 @router.get("/me")
 def me(user=Depends(current_user)):
     return {"user": user}
@@ -97,6 +106,7 @@ def me(user=Depends(current_user)):
 
 @router.post("/login")
 def login(data: Credentials, response: Response):
+    protect_auth(data, "login")
     with connect() as db:
         user = db.execute(
             "SELECT * FROM users WHERE username=? AND is_active=1", (data.username,)
@@ -131,11 +141,13 @@ def logout(request: Request, response: Response):
 
 @router.post("/register")
 def register(data: Registration, response: Response):
+    protect_auth(data, "register")
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         invite = db.execute(
-            "SELECT * FROM invite_codes WHERE code=? AND used_count < max_uses AND expires_at>datetime('now')",
-            (data.invite_code,),
+            "SELECT * FROM invite_codes WHERE ((kind='link' AND code=?) OR (kind='code' AND code=?)) "
+            "AND deleted_at IS NULL AND used_count < max_uses AND expires_at>datetime('now')",
+            (data.invite_code.strip(), re.sub(r"[\s-]", "", data.invite_code).upper()),
         ).fetchone()
         if not invite:
             raise HTTPException(403, "邀请链接无效、已过期或使用次数已用完")
@@ -149,7 +161,7 @@ def register(data: Registration, response: Response):
         ).lastrowid
         db.execute(
             "UPDATE invite_codes SET used_by=?,used_count=used_count+1 WHERE code=?",
-            (uid, data.invite_code)
+            (uid, invite["code"])
         )
     start_session(response, {"id": uid})
     return {"user": {"id": uid, "username": data.username, "role": "user"}}

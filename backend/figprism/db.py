@@ -10,7 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
  role TEXT NOT NULL CHECK(role IN ('admin','user')), is_active INTEGER NOT NULL DEFAULT 1,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS sessions (jti TEXT PRIMARY KEY, user_id INTEGER REFERENCES users(id), expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS invite_codes (code TEXT PRIMARY KEY, created_by INTEGER REFERENCES users(id), used_by INTEGER REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, max_uses INTEGER NOT NULL DEFAULT 1, used_count INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS invite_codes (code TEXT PRIMARY KEY, created_by INTEGER REFERENCES users(id), used_by INTEGER REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, max_uses INTEGER NOT NULL DEFAULT 1, used_count INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'link', deleted_at TEXT);
+CREATE TABLE IF NOT EXISTS auth_rate_limits (key TEXT NOT NULL, created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS auth_rate_key_time ON auth_rate_limits(key,created_at);
+CREATE INDEX IF NOT EXISTS auth_rate_time ON auth_rate_limits(created_at);
+CREATE TABLE IF NOT EXISTS auth_challenge_uses (digest TEXT PRIMARY KEY, expires_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS domains (slug TEXT PRIMARY KEY, config TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS papers (
  id TEXT PRIMARY KEY, doc_uid TEXT UNIQUE NOT NULL, file_sha256 TEXT UNIQUE NOT NULL,
@@ -154,6 +158,10 @@ def init_db(recover_jobs=False, preserve_job_ids=()):
         if "used_count" not in invite_columns:
             db.execute("ALTER TABLE invite_codes ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0")
             db.execute("UPDATE invite_codes SET used_count=1 WHERE used_by IS NOT NULL")
+        if "kind" not in invite_columns:
+            db.execute("ALTER TABLE invite_codes ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'")
+        if "deleted_at" not in invite_columns:
+            db.execute("ALTER TABLE invite_codes ADD COLUMN deleted_at TEXT")
         columns = {r[1] for r in db.execute("PRAGMA table_info(figures)")}
         for col_name, col_def in TAXONOMY_COLUMNS:
             if col_name not in columns:

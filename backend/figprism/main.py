@@ -1,6 +1,4 @@
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-import time
 import json
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -26,7 +24,7 @@ async def lifespan(app):
 
 app = FastAPI(title="FigPrism API", lifespan=lifespan)
 app.include_router(auth_router)
-limits = defaultdict(deque)
+
 
 
 @app.middleware("http")
@@ -43,22 +41,14 @@ async def guard(request: Request, call_next):
         if request.headers.get("sec-fetch-site") == "cross-site":
             return JSONResponse({"detail": "不允许跨站请求"}, status_code=403)
     if path in ("/api/auth/login", "/api/auth/register") and request.method == "POST":
-        key = request.client.host if request.client else "unknown"
-        now = time.monotonic()
-        q = limits[key]
-        while q and q[0] < now - 60:
-            q.popleft()
-        if len(q) >= 10:
+        from .auth_protection import rate_limit
+        from starlette.concurrency import run_in_threadpool
+        wait = await run_in_threadpool(rate_limit, "ip", request.client.host if request.client else "unknown")
+        if wait:
             return JSONResponse(
-                {"detail": "尝试过于频繁，请稍后再试"},
-                status_code=429,
-                headers={"Retry-After": "60", "Cache-Control": "private, no-store"},
+                {"detail": "尝试过于频繁，请稍后再试"}, status_code=429,
+                headers={"Retry-After": str(wait), "Cache-Control": "private, no-store"},
             )
-        q.append(now)
-        if len(limits) > 10000:
-            for old in list(limits):
-                if not limits[old] or limits[old][-1] < now - 60:
-                    del limits[old]
     response = await call_next(request)
     if path.startswith(
         (

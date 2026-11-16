@@ -34,3 +34,10 @@ pipeline:
   per_paper_figures: 3
   retry_attempts: 3
   arxiv_interval: 3
+
+# Optional Cloudflare Turnstile. Enable only after setting real production keys.
+turnstile:
+  enabled: false
+  site_key: ""
+  secret_key: ""
+  allowed_hostnames: [figprism.ai4any.com]

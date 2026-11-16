@@ -81,3 +81,29 @@ def test_legacy_migration_preserves_spent_invites_and_is_idempotent(client):
     with connect() as db:
         assert tuple(db.execute("SELECT max_uses,used_count FROM invite_codes WHERE code='old-used'").fetchone())==(5,3)
     assert register(client,'old-unused','legacy-user').status_code==200
+
+@pytest.mark.parametrize('kind',['link','code'])
+def test_invitation_kind_normalization_and_deletion(client,kind):
+    admin(client)
+    item=client.post('/api/admin/invites',json={'kind':kind,'max_uses':2}).json()
+    assert item['kind']==kind
+    code=item['code']
+    supplied=' '.join(code.lower()[n:n+4] for n in range(0,len(code),4)) if kind=='code' else code
+    assert register(client,supplied,'accepted').status_code==200
+    assert client.delete('/api/admin/invites/'+code).status_code==403
+    client.post('/api/auth/login',json={'username':'invite-admin','password':PASSWORD})
+    assert client.delete('/api/admin/invites/'+code).status_code==200
+    assert client.delete('/api/admin/invites/'+code).status_code==404
+    assert all(row['code']!=code for row in client.get('/api/admin/invites').json()['items'])
+    assert register(client,supplied,'not-accepted').status_code==403
+    assert client.post('/api/auth/login',json={'username':'accepted','password':PASSWORD}).status_code==200
+    with connect() as db:
+        row=db.execute('SELECT used_count,deleted_at FROM invite_codes WHERE code=?',(code,)).fetchone()
+        assert row['used_count']==1 and row['deleted_at']
+
+
+def test_link_case_is_not_normalized(client):
+    admin(client)
+    with connect() as db:db.execute("INSERT INTO invite_codes(code,expires_at) VALUES('AbCdEf',datetime('now','+1 day'))")
+    assert register(client,'abcdef','wrong-case').status_code==403
+    assert register(client,'AbCdEf','right-case').status_code==200
