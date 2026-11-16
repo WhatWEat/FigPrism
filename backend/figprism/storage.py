@@ -355,7 +355,9 @@ class Storage:
                 "PROPFIND",
                 self.url(key),
                 headers={"Depth": "1"},
-                content=b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>',
+                content=(b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/>'
+                         + (b'<d:getcontentlength/>' if include_sizes else b'')
+                         + b'</d:prop></d:propfind>'),
             )
             res.raise_for_status()
         base = unquote(urlparse(self.url()).path).rstrip("/") + "/"
@@ -371,7 +373,10 @@ class Storage:
                                            if " 200 " in p.findtext("{DAV:}status", "")), None)
                         if properties is None:
                             raise ValueError("WebDAV 未返回文件属性，无法完整盘点")
-                    directory = properties is not None and properties.find("{DAV:}resourcetype/{DAV:}collection") is not None
+                    directory = (
+                        properties is not None
+                        and properties.find("{DAV:}resourcetype/{DAV:}collection") is not None
+                    ) if include_sizes else entry.find(".//{DAV:}collection") is not None
                     item = {"key": self.validate(relative), "directory": directory}
                     if include_sizes and not directory:
                         length = properties.findtext("{DAV:}getcontentlength", "")

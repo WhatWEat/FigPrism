@@ -122,3 +122,15 @@ async def test_webdav_inventory_requires_successful_file_lengths(client):
         xml = xml.replace('<d:getcontentlength>0</d:getcontentlength>', '')
         with pytest.raises(ValueError, match='文件大小'):
             await store.list(include_sizes=True)
+
+@pytest.mark.asyncio
+async def test_existing_directory_listing_handles_split_properties(client):
+    import httpx
+    store = Storage()
+    store.settings.webdav.url = 'https://dav.example.test'
+    async def response(request):
+        assert b'getcontentlength' not in request.content
+        return httpx.Response(207, text='''<d:multistatus xmlns:d="DAV:"><d:response><d:href>/figprism/papers/</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>''')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as http:
+        store._client = http
+        assert await store.list() == [{'key':'papers','directory':True}]
