@@ -1,149 +1,135 @@
-# FigPrism：在 ai4any.com 所属 Cloudflare 账号配置认证保护
+# FigPrism：用自有 Cloudflare 账号提供 Turnstile 认证保护
 
-目标网站：`https://figprism.ai4any.com`。应用仍部署在现有服务器，不迁移到 Cloudflare。
-本文可以直接交给管理 `ai4any.com` 的同事或 Agent 执行。
+网站：`https://figprism.ai4any.com`。应用继续部署在现有服务器。
 
-## 交付边界
+## 当前部署状态
 
-仓库提供邀请码/链接的次数限制与删除、登录/注册 Turnstile 接入、服务端校验和限流。
-**当前账号没有配置另一个账号的 Turnstile 或 WAF；生产 Turnstile 默认关闭。**
-完成下面的密钥配置并重新部署后，才会启用生产人机验证。
-不要把 Secret Key、API Token 写进 Git、PR、聊天消息或截图。
+- **Turnstile 已在用户自己的 Cloudflare 账号创建并启用**，即管理 `zhcanfly.com` 的账号。
+- Widget 名称：`FigPrism login and registration`。
+- 允许的 hostname：`figprism.ai4any.com`；模式：`Managed`；pre-clearance：`no_clearance`。
+- 登录与注册均启用服务端 Siteverify 校验、hostname/action 校验和 token 防重放。
+- Site Key 与 Secret Key 保存在服务器 `config/local.yaml`，该文件被 Git 忽略。
+- 应用端每 IP、每账号每分钟 10 次限流继续生效，计数跨进程共享。
+- 源站已配置可信 Cloudflare 网段与真实客户端 IP；不信任任意来源伪造的转发头。
+- **没有修改 `ai4any.com` 的 DNS 或 WAF**。本账号不具备该 zone 的管理权。
 
-## 1. 创建 Turnstile Widget
+## 1. 为什么无需管理 ai4any.com 的 Cloudflare 账号
 
-在正确的 Cloudflare 账号进入 **Turnstile → Add widget**：
+Turnstile 是独立的人机验证服务，其所属账号不必与网站域名的管理账号相同。
+可以在自己账号的 Turnstile 中手动添加网站 hostname，即使它不在该账号的 DNS zone 列表中。
+网站拥有者负责将公钥放入页面、将私钥放入服务器，并验证用户提交的 token。
+
+因此，本项目的分工是：
+
+| 资源 | 管理位置 |
+| --- | --- |
+| Turnstile widget 与密钥 | 用户自己管理 zhcanfly.com 的 Cloudflare 账号 |
+| 登录、注册、限流与 token 校验 | FigPrism 本地服务器 |
+| figprism.ai4any.com 的解析记录 | 现有可操作的 DNS 记录；无需为 Turnstile 修改 |
+| ai4any.com 的 WAF / 边缘限流 | 另一个账号；本次未配置，也不是 Turnstile 的前提 |
+
+Turnstile 不要求网站经过 Cloudflare 代理。WAF 边缘规则则需要对应 zone 的权限和代理流量。
+
+## 2. 查看、重建或轮换 widget
+
+登录自己的 Cloudflare 账号，进入 **Turnstile**，找到上述名称的现有 widget。
+日常维护优先使用现有组件，不要重复创建。
+
+重建时选择：
 
 | 配置项 | 值 |
 | --- | --- |
 | 名称 | `FigPrism login and registration` |
-| Hostname | `figprism.ai4any.com` |
+| Hostname | `figprism.ai4any.com`（手动输入，不必在已有 zone 列表中选择） |
 | Widget mode | `Managed` |
-| Pre-clearance | 不启用；本项目使用表单 token 的 Siteverify 校验 |
+| Pre-clearance | 不启用 |
 
-不添加 `localhost`、通配域名或其他项目域名。
-如需支持兼容域名直接显示登录页，可另加 `fig.zhcanfly.com`；仅做跳转时不需要。
-保存生成的 **Site Key** 与 **Secret Key**。Turnstile 不要求 DNS 必须代理，但下文 WAF 边缘限流要求代理。
+不要因为账号管理的是 zhcanfly.com 就把 hostname 填成 zhcanfly.com。
+这里必须填写浏览器实际展示登录页的 hostname，不带协议、端口或路径。
+不添加 localhost 或不属于本项目的站点。兼容域名仅做跳转时无需加入。
 
-## 2. 在本地服务器填入私密配置
+轮换 Secret Key 后，按下一节更新服务器配置并重启后端。
+不要把 Secret Key、API Token 写进 Git、PR、聊天消息、命令行参数或截图。
 
-仓库目录：`/root/code/FigPrism`。
-编辑已被 Git 忽略的 `config/local.yaml`，**只增加/更新 turnstile 段，保留原有所有配置**：
+## 3. 服务器密钥配置与生效
+
+目录：`/root/code/FigPrism`。
+私密配置：`config/local.yaml`，仅修改其中的 turnstile 段：
 
 ```yaml
 turnstile:
   enabled: true
-  site_key: "填入 Site Key"
-  secret_key: "填入 Secret Key"
+  site_key: "当前 widget 的 Site Key"
+  secret_key: "同一 widget 的 Secret Key"
   allowed_hostnames:
     - figprism.ai4any.com
 ```
 
-`allowed_hostnames` 必须是浏览器实际访问的域名，不是 Docker 服务名，也不根据旧的内部 CSRF Origin 填写。
-本项目当前有旧域名 Origin 映射；不要为此次配置修改**根级 `secret_key`（会话签名密钥）**或 CSRF Origin。
+保留其他配置，尤其是**根级 secret_key（会话签名密钥）**、WebDAV、模型配置和现有 CSRF Origin。
+本项目保留旧域名 Origin 映射；allowed_hostnames 仍填浏览器地址栏里的实际域名。
 
-先检查是否存在需要保留的入库任务，再部署：
+配置在后端进程内缓存。确认没有该 backend 承接的网页入库任务后执行：
 
 ```bash
 cd /root/code/FigPrism
-docker compose ps
-# 如有该 backend 容器承接的网页入库任务，请等任务结束；不要强杀。
-docker compose build backend frontend
-docker compose up -d --no-deps backend frontend
+docker compose restart backend
+curl -fsS http://127.0.0.1:8101/api/health
+curl -fsS http://127.0.0.1:8101/api/auth/challenge-config
 ```
 
-后端配置有进程缓存，修改 local.yaml 后必须重新启动后端才会生效。
-`GET /api/auth/challenge-config` 应返回 `enabled: true` 和公开 Site Key，**不得包含 Secret Key**。
+最后一个接口应返回 enabled=true 与公开 Site Key，不能包含 Secret Key。
+仅修改密钥不需要重建前端。`docker compose up -d` 本身不保证重启未变化的容器。
+保留正在独立进程中执行的论文批次，不因更新验证配置重启其他服务。
 
-## 3. 配置 Cloudflare 边缘限流
+## 4. 已有防爆破保护
 
-进入 `ai4any.com` → **Security / WAF → Rate limiting rules**（后台菜单名称可能调整）。
-先检查现有规则，避免覆盖已有规则；免费套餐可能只有一个规则名额。
-确认 `figprism` DNS 记录已启用代理；不要改 IP 或对其他子域启用新规则。
+- 登录/注册请求先经过服务端每 IP 每分钟 10 次限制。
+- 通过人机验证后，还受每账号每分钟 10 次限制。
+- 开启 Turnstile 后，缺少 token、token 过期/已使用、域名或 action 不匹配均拒绝。
+- 人机验证服务异常时返回错误，不静默放行；用户可重新验证后重试。
+- 邀请码/链接的次数消费与注册在同一个数据库事务中完成；删除邀请立即阻止后续注册。
 
-规则名：`FigPrism authentication requests`。
-**Business / Enterprise**：可使用以下表达式（Host + Method + Path）：
+Nginx 只信任 Cloudflare 官方网段的 CF-Connecting-IP，并用校验后的单一地址覆盖 X-Forwarded-For。
+配置文件：`deploy/cloudflare-realip.conf`；现有源站已部署，**不要重复添加 include**。
+重建服务器时核对 [IPv4 网段](https://www.cloudflare.com/ips-v4) 和 [IPv6 网段](https://www.cloudflare.com/ips-v6)，执行 nginx -t 后再 reload。
 
-```text
-(http.host eq "figprism.ai4any.com"
- and http.request.method eq "POST"
- and http.request.uri.path in {"/api/auth/login" "/api/auth/register"})
-```
+## 5. WAF 边缘限流：当前不依赖
 
-**Pro**：若套餐不支持 Method 条件，使用 Host + Path；这两个地址只用于认证：
+目前没有 ai4any.com 的 zone 管理权，无法在自己的账号中给它设置 WAF。
+这不影响上面的 Turnstile 和应用限流，无需为此迁移域名或修改 CNAME。
 
-```text
-(http.host eq "figprism.ai4any.com"
- and http.request.uri.path in {"/api/auth/login" "/api/auth/register"})
-```
+若以后获得该 zone 的管理权限，可再给登录/注册接口增加边缘限流。
+套餐字段能力不同：Free 通常只能按 Path 匹配，Pro 可加 Host，Business/Enterprise 可加 Method。
+不能为了绕过套餐限制直接删除 Host 条件，把规则意外应用到同 zone 的其他站点。
+若将来迁移到自己控制的 fig.zhcanfly.com，可在自己的 zone 中管理这些规则；这不是本次部署方案。
 
-**Free**：官方能力表目前只允许 Path 等有限字段，不支持上述 Host / Method 条件。
-只有在确认同一 zone 的其他子域不使用这些路径时，才考虑下面的 zone 范围规则：
+## 6. 验收与故障排查
 
-```text
-http.request.uri.path in {"/api/auth/login" "/api/auth/register"}
-```
+1. 用真实浏览器打开登录弹窗和“邀请码注册”，确认出现验证组件。
+2. 完成验证后登录/注册成功；密码错误后能重新验证并重试。
+3. 不带 token 的认证请求被拒绝，不能绕过页面直接调用接口。
+4. token 重复使用、错误 hostname/action 被拒绝；私有接口仍返回 private,no-store。
+5. 查看自己账号下 Turnstile Analytics 的服务端校验记录。
 
-如果其他子域也有同名接口，**不要直接删掉 Host 条件后上线**；先使用 Turnstile + 本项目应用限流，暂不创建这条边缘规则。无需为本次操作自动升级套餐。
+常见问题：
 
-推荐设置：
+- Widget 域名错误：检查允许的 hostname 与浏览器地址栏。
+- 前端通过但后端失败：核对密钥配对、hostname/action、token 有效期及重复使用。
+- 自动化浏览器被拦截：这可能是正常的反自动化判断；用真实浏览器做人工验收。不要在生产注入测试 token 或关闭校验来让测试通过。
+- 网络或密钥故障导致无法登录：仅站点管理员在服务器临时将 turnstile.enabled 改为 false 并重启 backend；保留应用限流，修复后重新启用。
 
-- 按客户端 IP 计数。
-- 每个 IP **10 秒内超过 10 次**匹配请求时阻止 **10 秒**，作为边缘突发流量保护。
-- Action 使用 **Block**，不要给 JSON API 返回需要交互的整页 Managed Challenge。
-- 如果套餐支持自定义响应，返回 HTTP `429` 与 JSON 提示；不支持时使用默认阻止响应即可。
-- 不匹配 `/api/assets/*`、`/api/stream/*`、论文导入或普通页面浏览。
+隔离测试使用测试桩。Cloudflare 测试密钥的响应没有真实 action，不能代替生产密钥验证完整链路。
 
-免费套餐的时间窗口、动作和规则数量有限；如当前后台不允许上述参数，依据该套餐可选项调整，并记录最终值。不要为了配置规则自动升级付费套餐。
-应用端另有每 IP、每账号每分钟 10 次限制，边缘规则不是它的替代品。
+## 官方参考
 
-## 4. 核对源站真实 IP
+- [Turnstile 独立部署与前后端流程](https://developers.cloudflare.com/turnstile/get-started/)
+- [添加独立 hostname](https://developers.cloudflare.com/turnstile/additional-configuration/hostname-management/)
+- [服务端 Siteverify 校验](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
+- [WAF 限流套餐能力](https://developers.cloudflare.com/learning-paths/application-security/rate-limiting/features/)
 
-Nginx 应仅信任 Cloudflare 官方网段提供的 `CF-Connecting-IP`；任意客户端自带的这个头不可信。
-仓库提供 `deploy/cloudflare-realip.conf`，仅在 FigPrism 的 server 块内 include。
-本轮部署已在当前源站应用并验证；接手时先检查，**已有 include 不要重复添加**。下面的安装命令用于重建或迁移配置。
-正式启用前核对它与 Cloudflare 当前官方 IP 网段是否一致：
+## 本次启用验证记录（2026-11-16）
 
-- https://www.cloudflare.com/ips-v4
-- https://www.cloudflare.com/ips-v6
-
-```bash
-sudo install -m 644 deploy/cloudflare-realip.conf /etc/nginx/snippets/figprism-cloudflare-realip.conf
-# 在 FigPrism HTTPS server 块增加：
-# include /etc/nginx/snippets/figprism-cloudflare-realip.conf;
-# /api/ 与 /api/stream/ 中转发的 X-Forwarded-For 应为 $remote_addr，
-# 不拼接访客自行发送的 X-Forwarded-For。
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-不要对来自任意网段的请求直接信任 CF-Connecting-IP。
-如额外收紧源站防火墙，只允许 Cloudflare 回源，须先检查其他站点、SSH 与运维访问；这不是本次默认自动执行的操作。
-
-## 5. 验收
-
-1. 未登录打开登录弹窗，出现 Turnstile 验证；“邀请码注册”模式也有验证。
-2. 用真实浏览器完成验证，正常登录和邀请码注册成功。
-3. 密码错误后可以重新验证并重试，过期 token 不可继续提交。
-4. 向登录、注册 API 发不带 `turnstile_token` 的请求，应被拒绝；不应因前端按钮隐藏而放行。
-5. 同一个 token 二次使用应被拒绝；后端还校验 token 的 hostname 与 `login` / `register` action。
-6. 连续失败请求触发 429；正常看图和已登录会话不受影响。
-7. 邀请码或邀请链接删除后不能再注册；已注册账号仍可登录。
-8. 检查 `/api/auth/*`、`/api/admin/*` 继续返回 `Cache-Control: private, no-store`。
-9. 观察 Cloudflare Turnstile Analytics 的服务端校验记录，以及 WAF 规则命中情况。
-
-自动化测试请使用隔离环境与测试桩。Cloudflare 测试密钥的响应没有真实 action，不能用测试密钥代替生产密钥，也不要为测试在生产关闭 hostname/action 校验。
-
-## 6. 故障处理
-
-- Widget 报域名错误：检查允许的 hostname 与浏览器地址栏。
-- 前端验证成功但后端失败：检查两把密钥是否来自同一个 widget、hostname/action 是否正确、token 是否过期或重复。
-- Turnstile 网络不可达：服务端会拒绝认证并提示重试，不能静默绕过。
-- 需要恢复登录时：仅管理员在服务器将 `turnstile.enabled` 改为 `false` 并重启 backend；保留应用限流，修复后重新启用。不要修改前端伪造通过。
-
-参考官方文档：
-
-- [Turnstile 服务端校验](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
-- [Turnstile Widget 创建](https://developers.cloudflare.com/turnstile/get-started/widget-management/dashboard/)
-- [Rate limiting rules](https://developers.cloudflare.com/waf/rate-limiting-rules/)
-- [套餐与限流能力](https://developers.cloudflare.com/learning-paths/application-security/rate-limiting/features/)
+已核对 widget 所属账号、hostname、Managed 模式及 no_clearance 配置。
+后端配置接口 enabled=true；缺少 token 的登录/注册请求以及伪造 token 都被拒绝。
+认证防护专项 9 项测试通过，线上真实组件正常显示人工勾选框。
+自动化浏览器停在真人确认步骤，未代替用户勾选；实际通过挑战后的登录请用自己的浏览器完成一次验收。

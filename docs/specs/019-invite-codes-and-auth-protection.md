@@ -82,6 +82,14 @@
 - 后端 80 项测试通过，包含邀请码规范化、软删除、计数、验证失败、并发重放与限流持久化。
 - 7 项相关页面回归通过；隔离环境实际手输邀请码注册、计数更新、删除失效通过。
 - 类型检查、本地和 Docker 生产构建通过。
-- 用户说明域名在另一 Cloudflare 账号；本会话不创建 Widget 或 WAF 规则。
+- 用户随后授权使用自有 Cloudflare 账号创建 Turnstile；widget 允许 hostname 为 figprism.ai4any.com，不修改另一账号的 DNS / WAF。
 - 操作交接文档：docs/deploy/cloudflare-auth-protection.md。
-- 生产 Turnstile 保持关闭，配置真实密钥后按文档启用并人工完成真实挑战验收。
+- 生产 Turnstile 已配置真实密钥并启用；密钥仅在忽略的本地配置中，部署文档已改为自有账号方案。
+
+### 2026-11-16 自有账号启用验证
+
+- 已在管理 zhcanfly.com 的账号创建 Managed widget，允许 hostname 仅 figprism.ai4any.com，pre-clearance 为 no_clearance。
+- 私密配置写入后只重启 backend；challenge-config 确认 enabled=true。
+- Siteverify 可达且拒绝无效 token；线上登录/注册缺失 token 与伪造 token 均返回 403。
+- 认证防护专项 9 项通过；真实组件正常显示人工勾选框，真人通过后的实际登录仍需用户浏览器完成。
+- 未改变域名解析或另一账号 WAF，部署文档已去除必须由另一账号配置 Turnstile 的错误前提。
