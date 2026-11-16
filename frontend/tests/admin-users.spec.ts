@@ -13,7 +13,8 @@ test('separate users page shows counts, board filters, pagination, empty details
   const total=who.id===2?0:board?1:25;
   await r.fulfill({json:{user:who,boards:who.id===1?[{id:'a',name:'方法灵感',count:24},{id:'b',name:'实验配色',count:1}]:[],total,next_offset:offset+24<total?offset+24:null,items:Array.from({length:Math.min(24,total-offset)},(_,i)=>({id:`f${i}`,item_id:`i${offset+i}`,title:`收藏论文 ${offset+i+1}`,fig_label:'Fig. 1',caption:'Caption',thumb_url:image,hd_url:image,collection_name:board==='b'?'实验配色':'方法灵感',saved_at:'2026-11-02 12:00:00'}))}});
  });
- await page.route('**/api/admin/invites',r=>r.fulfill({json:{url:'https://example.test/?invite=qa'}}));
+ let invitation:any=null;
+ await page.route('**/api/admin/invites',r=>{if(r.request().method()==='POST'){invitation={code:'qa',url:'https://example.test/?invite=qa',max_uses:1,used_count:0,remaining_uses:1,status:'active',expires_at:'2026-12-01 12:00:00'};return r.fulfill({json:invitation});}return r.fulfill({json:{items:invitation?[invitation]:[]}});});
  await page.goto('/admin/users');
  await expect(page.getByRole('heading',{name:'用户管理.'})).toBeVisible();
  await expect(page.getByLabel('用户总体统计')).toContainText('25');

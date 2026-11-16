@@ -4066,3 +4066,13 @@ button:disabled {
 .admin-pagination span { font-size:12px; }
 @media(max-width:700px) { .admin-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} .admin-favorites {grid-template-columns:repeat(2,minmax(0,1fr));} .managed-user {flex-wrap:wrap;gap:8px;} .user-detail-trigger {flex-basis:60%;} .admin-user-detail {padding:14px;} .resource-metrics .admin-metric {padding:12px;} }
 @media(max-width:420px) { .admin-favorites {grid-template-columns:1fr;} .cache-heading {flex-wrap:wrap;} }
+
+/* Spec 018: counted invitations in the users workspace. */
+.invite-create { display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin:16px 0; }
+.invite-create label { display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary); }
+.invite-create input { width:125px; }
+.invite-list { max-height:350px;overflow:auto;margin:16px 0; }
+.invite-entry { padding:14px 0;border-top:1px solid var(--border-hairline); }
+.invite-entry-heading { display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px; }
+.invite-entry-heading span,.invite-entry small { color:var(--text-secondary);font-size:12px; }
+.invite-entry .invite-box { margin:8px 0; }

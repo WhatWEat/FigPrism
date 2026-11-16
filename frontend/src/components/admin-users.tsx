@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Plus, Users } from "lucide-react";
-import { api, post } from "@/lib/api";
+import { Users } from "lucide-react";
+import { api } from "@/lib/api";
 import { Figure, User } from "@/lib/types";
 import { useUI } from "@/lib/store";
 import { Empty, ErrorMessage, Modal, Spinner, useUser } from "./ui";
 import { SignInGate } from "./workspace";
+import { AdminInvites } from "./admin-invites";
 
 type Account = User & {
   is_active: number;
@@ -50,8 +51,6 @@ export function AdminUsers() {
   const ui = useUI();
   const cache = useQueryClient();
   const [selected, setSelected] = useState<number | null>(null);
-  const [invite, setInvite] = useState("");
-  const [busy, setBusy] = useState(false);
   const result = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => api<UserList>("/admin/users"),
@@ -106,49 +105,9 @@ export function AdminUsers() {
                   <Users size={18} />
                   账号与邀请
                 </h2>
-                <button
-                  className="button primary"
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true);
-                    try {
-                      setInvite(
-                        (await post<{ url: string }>("/admin/invites")).url,
-                      );
-                    } catch (e) {
-                      ui.notify((e as Error).message);
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  <Plus size={15} />
-                  生成邀请链接
-                </button>
               </div>
-              <p>
-                邀请链接 7
-                天内有效，仅可使用一次。收藏图表按每个用户跨看板去重统计。
-              </p>
-              {invite && (
-                <div className="invite-box">
-                  <input aria-label="邀请链接" readOnly value={invite} />
-                  <button
-                    className="icon-button"
-                    aria-label="复制邀请链接"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(invite);
-                        ui.notify("邀请链接已复制");
-                      } catch {
-                        ui.notify("请手动复制邀请链接");
-                      }
-                    }}
-                  >
-                    <Copy size={16} />
-                  </button>
-                </div>
-              )}
+              <AdminInvites />
+              <p>收藏图表按每个用户跨看板去重统计。</p>
               <div className="managed-users">
                 {result.data.users.map((account) => (
                   <div className="managed-user" key={account.id}>
