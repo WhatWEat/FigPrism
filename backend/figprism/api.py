@@ -788,6 +788,8 @@ async def asset(kind: Literal["thumb", "hd", "raw"], filename: str, v: str = "")
         data = await storage.get(r["asset_base"] + "_" + kind + ext)
     except Exception:
         raise HTTPException(502, "远端图像暂时不可用，请稍后重试")
+    from .resource_insights import record_cache_access
+    record_cache_access(storage.cache_status)
     headers = {
         "X-FigPrism-Cache": storage.cache_status,
         "Cache-Control": "public, max-age=31536000, immutable"
@@ -1528,3 +1530,9 @@ async def admin_sync(body: SyncRequest, user=Depends(require_admin)):
 
     launch(run())
     return {"job_id": jid}
+
+
+from .admin_users import router as admin_users_router
+from .resource_insights import router as resource_insights_router
+router.include_router(admin_users_router)
+router.include_router(resource_insights_router)

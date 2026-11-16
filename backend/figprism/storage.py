@@ -349,13 +349,13 @@ class Storage:
                 pass
             return data
 
-    async def list(self, key=""):
+    async def list(self, key="", include_sizes=False):
         async with self.connection() as client:
             res = await client.request(
                 "PROPFIND",
                 self.url(key),
                 headers={"Depth": "1"},
-                content=b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+                content=b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>',
             )
             res.raise_for_status()
         base = unquote(urlparse(self.url()).path).rstrip("/") + "/"
@@ -365,10 +365,18 @@ class Storage:
             if href.startswith(base):
                 relative = href[len(base) :].strip("/")
                 if relative and relative != key.strip("/"):
-                    items.append(
-                        {
-                            "key": self.validate(relative),
-                            "directory": entry.find(".//{DAV:}collection") is not None,
-                        }
-                    )
+                    properties = entry.find(".//{DAV:}prop")
+                    if include_sizes:
+                        properties = next((p.find("{DAV:}prop") for p in entry.findall("{DAV:}propstat")
+                                           if " 200 " in p.findtext("{DAV:}status", "")), None)
+                        if properties is None:
+                            raise ValueError("WebDAV 未返回文件属性，无法完整盘点")
+                    directory = properties is not None and properties.find("{DAV:}resourcetype/{DAV:}collection") is not None
+                    item = {"key": self.validate(relative), "directory": directory}
+                    if include_sizes and not directory:
+                        length = properties.findtext("{DAV:}getcontentlength", "")
+                        if not length.isdigit():
+                            raise ValueError("WebDAV 未返回文件大小，无法完整盘点")
+                        item["size"] = int(length)
+                    items.append(item)
         return items
