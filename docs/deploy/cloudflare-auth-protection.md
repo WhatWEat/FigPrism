@@ -40,7 +40,7 @@ turnstile:
 ```
 
 `allowed_hostnames` 必须是浏览器实际访问的域名，不是 Docker 服务名，也不根据旧的内部 CSRF Origin 填写。
-本项目当前有旧域名 Origin 映射；不要为此次配置修改 `secret_key`、现有会话签名密钥或 CSRF Origin。
+本项目当前有旧域名 Origin 映射；不要为此次配置修改**根级 `secret_key`（会话签名密钥）**或 CSRF Origin。
 
 先检查是否存在需要保留的入库任务，再部署：
 
@@ -62,13 +62,29 @@ docker compose up -d --no-deps backend frontend
 确认 `figprism` DNS 记录已启用代理；不要改 IP 或对其他子域启用新规则。
 
 规则名：`FigPrism authentication requests`。
-匹配表达式：
+**Business / Enterprise**：可使用以下表达式（Host + Method + Path）：
 
 ```text
 (http.host eq "figprism.ai4any.com"
  and http.request.method eq "POST"
  and http.request.uri.path in {"/api/auth/login" "/api/auth/register"})
 ```
+
+**Pro**：若套餐不支持 Method 条件，使用 Host + Path；这两个地址只用于认证：
+
+```text
+(http.host eq "figprism.ai4any.com"
+ and http.request.uri.path in {"/api/auth/login" "/api/auth/register"})
+```
+
+**Free**：官方能力表目前只允许 Path 等有限字段，不支持上述 Host / Method 条件。
+只有在确认同一 zone 的其他子域不使用这些路径时，才考虑下面的 zone 范围规则：
+
+```text
+http.request.uri.path in {"/api/auth/login" "/api/auth/register"}
+```
+
+如果其他子域也有同名接口，**不要直接删掉 Host 条件后上线**；先使用 Turnstile + 本项目应用限流，暂不创建这条边缘规则。无需为本次操作自动升级套餐。
 
 推荐设置：
 
@@ -85,6 +101,7 @@ docker compose up -d --no-deps backend frontend
 
 Nginx 应仅信任 Cloudflare 官方网段提供的 `CF-Connecting-IP`；任意客户端自带的这个头不可信。
 仓库提供 `deploy/cloudflare-realip.conf`，仅在 FigPrism 的 server 块内 include。
+本轮部署已在当前源站应用并验证；接手时先检查，**已有 include 不要重复添加**。下面的安装命令用于重建或迁移配置。
 正式启用前核对它与 Cloudflare 当前官方 IP 网段是否一致：
 
 - https://www.cloudflare.com/ips-v4
