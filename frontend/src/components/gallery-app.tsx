@@ -61,7 +61,8 @@ import { PaperDeckCard, PaperSwimlane, PaperDeckFeed } from "./paper-groups";
 import { AuthModal, IngestModal } from "./auth-ingest";
 import { Inspector } from "./inspector";
 import { Boards, HistoryPage, AdminPage } from "./workspace";
-export type Page = "gallery" | "collections" | "history" | "admin";
+import { AdminUsers } from "./admin-users";
+export type Page = "gallery" | "collections" | "history" | "admin" | "users";
 export default function GalleryApp({ page = "gallery" }: { page?: Page }) {
   const [client] = useState(
     () =>
@@ -189,10 +190,16 @@ function Shell({ page }: { page: Page }) {
                     <div className="dropdown">
                       <strong>{user.username}</strong>
                       {user.role === "admin" && (
-                        <Link href="/admin">
-                          <Settings2 size={14} />
-                          系统控制中心
-                        </Link>
+                        <>
+                          <Link href="/admin">
+                            <Settings2 size={14} />
+                            系统控制中心
+                          </Link>
+                          <Link href="/admin/users">
+                            <Settings2 size={14} />
+                            用户管理
+                          </Link>
+                        </>
                       )}
                       <button
                         onClick={async () => {
@@ -238,6 +245,8 @@ function Shell({ page }: { page: Page }) {
           <Boards onIds={changeIds} />
         ) : page === "history" ? (
           <HistoryPage onIds={changeIds} />
+        ) : page === "users" ? (
+          <AdminUsers />
         ) : (
           <AdminPage />
         )}

@@ -202,7 +202,7 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
   await page.mouse.move(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
   await expect(dialog.locator(".loupe span")).toHaveText(/^#[0-9A-F]{6}$/);
   await page.mouse.click(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
-  await expect(page.getByRole("status")).toContainText("已复制");
+  await expect(page.locator(".toast[role=status]")).toContainText("已复制");
   await page.keyboard.press("i");
   await dialog.getByRole("button", { name: "框选重切" }).click();
   const preview = dialog.locator(".crop-page img");
@@ -237,7 +237,7 @@ test("subfigure focus, pixel picker, crop controls and saved board context", asy
     .getByRole("textbox", { name: "灵感笔记" })
     .fill("E2E: preserve this panel and note");
   await dialog.getByRole("button", { name: "保存至看板" }).click();
-  await expect(page.getByRole("status")).toContainText("灵感和笔记已保存");
+  await expect(page.locator(".toast[role=status]")).toContainText("灵感和笔记已保存");
   const boards = await (await page.request.get("/api/collections")).json();
   const board = boards.find((b: { name: string }) => b.name === "我的灵感收藏");
   expect(board).toBeTruthy();

@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
+import { ResourceInsights } from "./resource-insights";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bookmark,
@@ -552,7 +554,6 @@ export function AdminPage() {
   const user = useUser().data?.user;
   const ui = useUI();
   const cache = useQueryClient();
-  const [invite, setInvite] = useState("");
   const [editor, setEditor] = useState("");
   const [domain, setDomain] = useState("all");
   const [limit, setLimit] = useState(5);
@@ -602,16 +603,23 @@ export function AdminPage() {
           <h1>
             系统控制中心<span>.</span>
           </h1>
-          <p>管理研究领域、内容流水线与团队访问权限。</p>
+          <p>管理研究领域、内容流水线与资源存储。</p>
         </div>
         <span className="status-pill">
           <ShieldCheck size={14} />
           管理员
         </span>
       </div>
+      <div className="admin-nav">
+        <Link className="button" href="/admin/users">
+          <Users size={16} />
+          用户管理与邀请
+        </Link>
+      </div>
       <ErrorMessage error={result.error} />
       {result.data && (
         <div className="admin-grid">
+          <ResourceInsights />
           <section className="admin-card cache-panel" aria-label="本地缓存用量">
             <div className="cache-heading">
               <h2>
@@ -765,70 +773,6 @@ export function AdminPage() {
               <code>{result.data.vision_model}</code>
               <span>待复核图表</span>
               <strong>{result.data.review_count}</strong>
-            </div>
-          </section>
-          <section className="admin-card">
-            <h2>
-              <Users size={18} />
-              账号与邀请
-            </h2>
-            <p>默认关闭公开注册，邀请链接 7 天内有效且仅可使用一次。</p>
-            <button
-              className="button primary"
-              onClick={async () => {
-                try {
-                  setInvite(
-                    (await post<{ url: string }>("/admin/invites")).url,
-                  );
-                } catch (e) {
-                  ui.notify((e as Error).message);
-                }
-              }}
-            >
-              <Plus size={15} />
-              生成邀请链接
-            </button>
-            {invite && (
-              <div className="invite-box">
-                <input readOnly value={invite} />
-                <button
-                  className="icon-button"
-                  title="复制邀请链接"
-                  onClick={() => {
-                    navigator.clipboard.writeText(invite);
-                    ui.notify("邀请链接已复制");
-                  }}
-                >
-                  <Copy size={16} />
-                </button>
-              </div>
-            )}
-            <div className="user-list">
-              {result.data.users.map((u) => (
-                <div key={u.id}>
-                  <span className="avatar">{u.username[0].toUpperCase()}</span>
-                  <strong>{u.username}</strong>
-                  <small>{u.role}</small>
-                  {u.id !== user.id && (
-                    <button
-                      className="text-button"
-                      onClick={async () => {
-                        try {
-                          await api(`/admin/users/${u.id}`, {
-                            method: "PATCH",
-                            body: JSON.stringify({ is_active: !u.is_active }),
-                          });
-                          cache.invalidateQueries({ queryKey: ["admin"] });
-                        } catch (e) {
-                          ui.notify((e as Error).message);
-                        }
-                      }}
-                    >
-                      {u.is_active ? "停用" : "启用"}
-                    </button>
-                  )}
-                </div>
-              ))}
             </div>
           </section>
           <section className="admin-card">
