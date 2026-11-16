@@ -6,7 +6,7 @@ test('admin chooses invite capacity and sees refreshed usage after successful re
  let invitation:any=null;
  await page.route('**/api/admin/invites',r=>{
   if(r.request().method()==='POST'){
-   expect(r.request().postDataJSON()).toEqual({max_uses:3});
+   expect(r.request().postDataJSON()).toEqual({max_uses:3,kind:'link'});
    invitation={code:'test',url:'https://example.test/?invite=test',max_uses:3,used_count:0,remaining_uses:3,status:'active',expires_at:'2026-12-01 12:00:00'};
    return r.fulfill({json:invitation});
   }

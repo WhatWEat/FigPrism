@@ -4076,3 +4076,12 @@ button:disabled {
 .invite-entry-heading { display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px; }
 .invite-entry-heading span,.invite-entry small { color:var(--text-secondary);font-size:12px; }
 .invite-entry .invite-box { margin:8px 0; }
+
+/* Spec 019: revocable invitations and authentication challenges. */
+.invite-delete-confirm { display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg-subtle);padding:10px;border-radius:7px;margin-bottom:8px;font-size:12px; }
+.invite-create select { min-width:125px; }
+.auth-mode { display:flex;gap:6px;background:var(--bg-subtle);padding:4px;border-radius:8px; }
+.auth-mode button { flex:1;padding:9px;border-radius:6px;color:var(--text-secondary);font-size:13px; }
+.auth-mode button.active { background:var(--bg-surface);font-weight:700;color:var(--text-primary); }
+.auth-challenge { min-height:65px;max-width:100%; }
+.auth-challenge p { font-size:12px;color:var(--text-secondary); }

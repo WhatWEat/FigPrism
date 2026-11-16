@@ -13,18 +13,36 @@ import { api, post } from "@/lib/api";
 import { useUI } from "@/lib/store";
 import { Domain, Board } from "@/lib/types";
 import { Modal, Spinner, ErrorMessage } from "./ui";
+import { AuthChallenge } from "./auth-challenge";
 export function AuthModal() {
   const ui = useUI();
   const query = useQueryClient();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [token, setToken] = useState("");
+  const [challengeAttempt, setChallengeAttempt] = useState(0);
+  const challenge = useQuery({
+    queryKey: ["auth-challenge-config"],
+    queryFn: () =>
+      api<{ enabled: boolean; site_key: string | null }>(
+        "/auth/challenge-config",
+      ),
+    enabled: ui.loginOpen,
+    staleTime: 0,
+  });
+  useEffect(() => {
+    setToken("");
+    setChallengeAttempt((n) => n + 1);
+  }, [mode, ui.loginOpen]);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get("invite");
     if (code) {
       setInvite(code);
+      setMode("register");
       ui.openLogin();
     }
   }, []);
@@ -33,29 +51,71 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await post(invite ? "/auth/register" : "/auth/login", {
+      await post(mode === "register" ? "/auth/register" : "/auth/login", {
         username,
         password,
-        ...(invite ? { invite_code: invite } : {}),
+        ...(mode === "register" ? { invite_code: invite.trim() } : {}),
+        turnstile_token: token,
       });
       await query.invalidateQueries({ queryKey: ["me"] });
       useUI.setState({ loginOpen: false });
       setPassword("");
+      setInvite("");
+      setMode("login");
       ui.notify("欢迎回来，开始收集灵感吧");
     } catch (e) {
       setError(e as Error);
     } finally {
       setBusy(false);
+      setToken("");
+      setChallengeAttempt((n) => n + 1);
     }
   }
   return (
     <Modal
       open={ui.loginOpen}
       onOpenChange={(loginOpen) => useUI.setState({ loginOpen })}
-      title={invite ? "加入 FigPrism" : "登录你的灵感空间"}
+      title={mode === "register" ? "加入 FigPrism" : "登录你的灵感空间"}
       description="收藏图表、同步配色，以及整理下一篇论文的灵感。"
     >
       <form onSubmit={submit} className="form">
+        <div className="auth-mode">
+          <button
+            type="button"
+            className={mode === "login" ? "active" : ""}
+            onClick={() => {
+              setMode("login");
+              setError(null);
+            }}
+          >
+            已有账号
+          </button>
+          <button
+            type="button"
+            className={mode === "register" ? "active" : ""}
+            onClick={() => {
+              setMode("register");
+              setError(null);
+            }}
+          >
+            邀请码注册
+          </button>
+        </div>
+        {mode === "register" && (
+          <label>
+            邀请码
+            <input
+              aria-label="邀请码"
+              required
+              maxLength={256}
+              autoComplete="off"
+              spellCheck={false}
+              value={invite}
+              onChange={(event) => setInvite(event.target.value)}
+              placeholder="填写管理员提供的邀请码"
+            />
+          </label>
+        )}
         <label>
           用户名
           <input
@@ -75,16 +135,37 @@ export function AuthModal() {
             minLength={10}
             maxLength={128}
             type="password"
-            autoComplete={invite ? "new-password" : "current-password"}
+            autoComplete={
+              mode === "register" ? "new-password" : "current-password"
+            }
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="至少 10 位字符"
           />
         </label>
-        <ErrorMessage error={error} />
-        <button disabled={busy} className="button primary">
+        <ErrorMessage
+          error={error || challenge.error}
+          retry={challenge.error ? () => challenge.refetch() : undefined}
+        />
+        {ui.loginOpen && challenge.data?.enabled && challenge.data.site_key && (
+          <AuthChallenge
+            key={`${mode}-${challengeAttempt}`}
+            siteKey={challenge.data.site_key}
+            action={mode}
+            onToken={setToken}
+          />
+        )}
+        <button
+          disabled={
+            busy ||
+            challenge.isPending ||
+            challenge.isError ||
+            (challenge.data?.enabled && !token)
+          }
+          className="button primary"
+        >
           {busy ? <Spinner /> : <LockKeyhole size={16} />}{" "}
-          {invite ? "创建账号" : "登录"}
+          {mode === "register" ? "创建账号" : "登录"}
           <ArrowRight size={16} />
         </button>
         <p className="form-footnote">

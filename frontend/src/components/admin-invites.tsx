@@ -1,13 +1,14 @@
 "use client";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Copy, Plus } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, Plus, Trash2 } from "lucide-react";
 import { api, post } from "@/lib/api";
 import { useUI } from "@/lib/store";
 import { ErrorMessage, Spinner } from "./ui";
 
 type Invite = {
   code: string;
+  kind: "link" | "code";
   url: string;
   max_uses: number;
   used_count: number;
@@ -17,7 +18,11 @@ type Invite = {
 };
 export function AdminInvites() {
   const ui = useUI();
+  const cache = useQueryClient();
   const [uses, setUses] = useState("1");
+  const [kind, setKind] = useState<"link" | "code">("link");
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Invite | null>(null);
   const result = useQuery({
@@ -35,14 +40,25 @@ export function AdminInvites() {
   async function copy(url: string) {
     try {
       await navigator.clipboard.writeText(url);
-      ui.notify("邀请链接已复制");
+      ui.notify("邀请已复制");
     } catch {
-      ui.notify("请手动复制邀请链接");
+      ui.notify("请手动复制邀请");
     }
   }
   return (
     <section className="admin-invites" aria-label="邀请链接管理">
       <div className="invite-create">
+        <label>
+          邀请类型
+          <select
+            aria-label="邀请类型"
+            value={kind}
+            onChange={(event) => setKind(event.target.value as "link" | "code")}
+          >
+            <option value="link">邀请链接</option>
+            <option value="code">邀请码</option>
+          </select>
+        </label>
         <label>
           可使用次数
           <input
@@ -63,6 +79,7 @@ export function AdminInvites() {
             try {
               const invite = await post<Invite>("/admin/invites", {
                 max_uses: count,
+                kind,
               });
               setCreated(invite);
               await result.refetch();
@@ -73,11 +90,12 @@ export function AdminInvites() {
             }
           }}
         >
-          {busy ? <Spinner /> : <Plus size={15} />}生成邀请链接
+          {busy ? <Spinner /> : <Plus size={15} />}
+          {kind === "code" ? "生成邀请码" : "生成邀请链接"}
         </button>
       </div>
       <p className="cache-note">
-        每个链接 7 天内有效，可供指定人数成功注册；注册失败不消耗次数。默认 1
+        每个邀请 7 天内有效，可供指定人数成功注册；注册失败不消耗次数。默认 1
         次，最多 1000 次。
       </p>
       {!valid && (
@@ -97,7 +115,8 @@ export function AdminInvites() {
             <div className="invite-entry" key={item.code}>
               <div className="invite-entry-heading">
                 <strong>
-                  已用 {item.used_count} / {item.max_uses} 次 · 剩余{" "}
+                  {item.kind === "code" ? "邀请码" : "邀请链接"} · 已用{" "}
+                  {item.used_count} / {item.max_uses} 次 · 剩余{" "}
                   {item.remaining_uses} 次
                 </strong>
                 <span>
@@ -109,15 +128,76 @@ export function AdminInvites() {
                 </span>
               </div>
               <div className="invite-box">
-                <input aria-label="邀请链接" readOnly value={item.url} />
+                <input
+                  aria-label={item.kind === "code" ? "邀请码" : "邀请链接"}
+                  readOnly
+                  value={
+                    item.kind === "code"
+                      ? item.code.match(/.{1,4}/g)?.join("-") || item.code
+                      : item.url
+                  }
+                />
                 <button
                   className="icon-button"
-                  aria-label="复制邀请链接"
-                  onClick={() => copy(item.url)}
+                  aria-label={
+                    item.kind === "code" ? "复制邀请码" : "复制邀请链接"
+                  }
+                  onClick={() =>
+                    copy(item.kind === "code" ? item.code : item.url)
+                  }
                 >
                   <Copy size={16} />
                 </button>
+                <button
+                  className="icon-button danger"
+                  aria-label={
+                    item.kind === "code" ? "删除邀请码" : "删除邀请链接"
+                  }
+                  onClick={() => setDeleting(item.code)}
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
+              {deleting === item.code && (
+                <div
+                  className="invite-delete-confirm"
+                  role="group"
+                  aria-label="确认删除邀请"
+                >
+                  <span>删除后立即失效，已注册账号不受影响。</span>
+                  <button
+                    className="button small"
+                    disabled={deletingBusy}
+                    onClick={async () => {
+                      setDeletingBusy(true);
+                      try {
+                        await api(
+                          `/admin/invites/${encodeURIComponent(item.code)}`,
+                          { method: "DELETE" },
+                        );
+                        if (created?.code === item.code) setCreated(null);
+                        cache.setQueryData<{items:Invite[]}>(["admin-invites"],old=>old?{items:old.items.filter(entry=>entry.code!==item.code)}:old);
+                        setDeleting(null);
+                        await result.refetch();
+                        ui.notify("邀请已删除并失效");
+                      } catch (error) {
+                        ui.notify((error as Error).message);
+                      } finally {
+                        setDeletingBusy(false);
+                      }
+                    }}
+                  >
+                    确认删除
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={deletingBusy}
+                    onClick={() => setDeleting(null)}
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
               <small>
                 有效期至{" "}
                 {new Date(
