@@ -15,6 +15,7 @@ HOSTS = {
     "dblp.org",
     "api.openalex.org",
     "openaccess.thecvf.com",
+    "aclanthology.org",
 }
 
 
