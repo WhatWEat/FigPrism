@@ -402,3 +402,69 @@
   - genomic selection
   vlm_criteria: Identify figures relevant to 数据筛选与合成; assign sub_tags only when supported
     by the figure and caption.
+- slug: llm-as-judge
+  name: LLM-as-a-Judge
+  color_dot: '#6b8e91'
+  arxiv_cats:
+  - cs.CL
+  - cs.AI
+  - cs.LG
+  phrases:
+  - LLM-as-a-judge
+  - LLM-as-judge
+  - LLMs-as-judges
+  - LLM-as-judges
+  - LLM as a judge
+  - LLMs as judges
+  - LLM judges
+  - LLM judge
+  - LLM-judges
+  - LLM-judge
+  - LLM-based evaluator
+  - LLM-based evaluators
+  - LLM-based evaluation
+  - language models as judges
+  - language model as a judge
+  - language model judges
+  - large language model evaluators
+  - LLM evaluators
+  - LLM evaluator
+  - judge models
+  - judge model
+  - generative judges
+  - generative judge
+  - model-based judge
+  - rubric-based evaluation
+  - rubric-guided evaluation
+  - pairwise LLM judging
+  - LLM-as-a-rater
+  - LLM-as-an-evaluator
+  - MLLM-as-a-judge
+  - VLM-as-a-judge
+  - evaluation with LLMs
+  - LLM judging
+  - LLMs-as-a-judge
+  - LLMs-as-judge
+  - LLM-based judges
+  - LLM-based judge
+  - large language model (LLM) as a judge
+  - large language models (LLMs) as judges
+  - large language models (LLMs) as evaluators
+  - language model-based evaluation
+  - SpeechLLM-as-Judges
+  acronyms:
+  - LLMaaJ
+  exclude_terms: []
+  sub_tags:
+  - 评判器训练与蒸馏
+  - 评分标准 / Rubric
+  - 偏差、鲁棒性与校准
+  - 人类偏好与一致性
+  - 成对比较与元评估
+  vlm_criteria: 'Identify figures about language models acting as judges or evaluators:
+    judge training/distillation, rubrics, pairwise scoring, bias/calibration/robustness,
+    meta-evaluation and agreement with human preferences. Do not assign this domain
+    merely because an unrelated method uses an LLM judge as one evaluation metric,
+    or because a paper discusses legal/moral judgments. Assign sub_tags only when
+    supported by the figure and caption.'
+  is_active: true
