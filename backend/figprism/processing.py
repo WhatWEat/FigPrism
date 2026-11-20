@@ -150,10 +150,32 @@ def execute(request):
 
 if __name__ == "__main__":
     # A coordinator crash must not leave native work running after its slot is freed.
-    import ctypes, signal
+    parent = int(os.environ.get("FIGPRISM_PARENT_PID", os.getppid()))
+    if sys.platform == "linux":
+        import ctypes, signal
 
-    ctypes.CDLL(None).prctl(1, signal.SIGTERM)
-    if os.getppid() != int(os.environ.get("FIGPRISM_PARENT_PID", os.getppid())):
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)
+    else:
+        # macOS and the BSDs have no PR_SET_PDEATHSIG; a kqueue exit watch on the
+        # coordinator gives the same guarantee.
+        import select, threading
+
+        kq = select.kqueue()
+        kq.control(
+            [
+                select.kevent(
+                    parent,
+                    select.KQ_FILTER_PROC,
+                    select.KQ_EV_ADD,
+                    select.KQ_NOTE_EXIT,
+                )
+            ],
+            0,
+        )
+        threading.Thread(
+            target=lambda: (kq.control(None, 1), os._exit(1)), daemon=True
+        ).start()
+    if os.getppid() != parent:
         raise SystemExit(1)
     request = pickle.loads(Path(sys.argv[1]).read_bytes())
     try:
